@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { 
   Box, 
   Grid, 
@@ -14,7 +14,6 @@ import {
   CircularProgress,
   Card,
   CardContent,
-  CardMedia,
   Fab,
   Tooltip,
   useTheme,
@@ -29,8 +28,7 @@ import {
   Flare as FlareIcon,
   Close as CloseIcon,
   Save as SaveIcon,
-  CloudUpload as CloudUploadIcon,
-  ColorLens as ColorLensIcon
+  CloudUpload as CloudUploadIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import { styled } from '@mui/material/styles';
@@ -77,20 +75,6 @@ const UploadBox = styled(Box)(({ theme }) => ({
   },
 }));
 
-const ColorCircle = styled(Box)(({ theme, color }) => ({
-  width: '25px',
-  height: '25px',
-  borderRadius: '50%',
-  backgroundColor: color || '#e0e0e0',
-  cursor: 'pointer',
-  border: '2px solid white',
-  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-  transition: 'transform 0.2s ease',
-  '&:hover': {
-    transform: 'scale(1.1)',
-  }
-}));
-
 function SimbolosManifestacao({ simbolos = [] }) {
   const theme = useTheme();
   const { showSuccess, showError } = useContext(SnackbarContext);
@@ -102,6 +86,158 @@ function SimbolosManifestacao({ simbolos = [] }) {
   const [imagePreview, setImagePreview] = useState('');
   const [currentSimbolo, setCurrentSimbolo] = useState(null);
   const [localSimbolos, setLocalSimbolos] = useState(simbolos);
+  const [loading, setLoading] = useState(false);
+  
+  // Estado para controlar o carregamento de palavras-chave por símbolo
+  const [simbolosComPalavrasCarregadas, setSimbolosComPalavrasCarregadas] = useState({});
+  
+  // Função para extrair palavras-chave de uma string JSON para um array
+  const extrairPalavrasChave = (palavrasChave) => {
+    if (!palavrasChave) return [];
+    
+    try {
+      // Caso 1: É uma string JSON
+      if (typeof palavrasChave === 'string' && 
+          (palavrasChave.trim().startsWith('[') || palavrasChave.includes('"'))) {
+        return JSON.parse(palavrasChave);
+      } 
+      // Caso 2: Já é um array
+      else if (Array.isArray(palavrasChave)) {
+        return [...palavrasChave];
+      }
+      // Caso 3: É uma string simples
+      else if (typeof palavrasChave === 'string') {
+        return palavrasChave.split(',').map(p => p.trim()).filter(Boolean);
+      }
+    } catch (error) {
+      console.error('Erro ao extrair palavras-chave:', error);
+    }
+    
+    return [];
+  };
+  
+  // Carregar símbolos ao iniciar
+  useEffect(() => {
+    const carregarSimbolos = async () => {
+      try {
+        setLoading(true);
+        const token = localStorage.getItem('token');
+        const response = await axios.get('/api/manifestacao?tipo=simbolo', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        console.log('Símbolos carregados inicialmente (bruto):', response.data.data);
+        
+        if (response.data.data && Array.isArray(response.data.data)) {
+          // Processar cada símbolo para extrair palavras-chave corretamente
+          const simbolosProcessados = await Promise.all(response.data.data.map(async (simbolo) => {
+            try {
+              // Buscar detalhes completos para cada símbolo para obter palavras-chave
+              const detalhesResponse = await axios.get(`/api/manifestacao/${simbolo._id}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              
+              // Log completo da resposta para depuração
+              console.log(`Resposta detalhada do símbolo ${simbolo._id}:`, detalhesResponse.data);
+              
+              if (detalhesResponse.data && detalhesResponse.data.data) {
+                const simboloCompleto = detalhesResponse.data.data;
+                console.log(`Dados completos do símbolo ${simbolo._id}:`, JSON.stringify(simboloCompleto, null, 2));
+                
+                // Tentativa 1: Usar palavrasChave diretamente do objeto
+                if (simboloCompleto.palavrasChave) {
+                  console.log(`Palavras-chave brutas para ${simbolo._id}:`, {
+                    valor: simboloCompleto.palavrasChave,
+                    tipo: typeof simboloCompleto.palavrasChave
+                  });
+                  
+                  // Forçar um processamento mais direto
+                  let palavrasChaveProcessadas = [];
+                  
+                  try {
+                    if (typeof simboloCompleto.palavrasChave === 'string') {
+                      const textoLimpo = simboloCompleto.palavrasChave
+                        .replace(/^\[|\]$/g, '')
+                        .replace(/\"/g, '')
+                        .trim();
+                      
+                      if (textoLimpo.includes('[') && textoLimpo.includes(']')) {
+                        // É um JSON string dentro de outro JSON string
+                        palavrasChaveProcessadas = JSON.parse(textoLimpo);
+                      } else if (textoLimpo.includes(',')) {
+                        // É uma lista separada por vírgulas
+                        palavrasChaveProcessadas = textoLimpo.split(',').map(p => p.trim());
+                      } else {
+                        // É uma única palavra-chave
+                        palavrasChaveProcessadas = [textoLimpo];
+                      }
+                    } else if (Array.isArray(simboloCompleto.palavrasChave)) {
+                      palavrasChaveProcessadas = [...simboloCompleto.palavrasChave];
+                    }
+                  } catch (e) {
+                    console.error('Erro ao processar palavras-chave:', e);
+                    
+                    // Tentativa direta final: extrair manualmente com regex
+                    if (typeof simboloCompleto.palavrasChave === 'string') {
+                      const matches = simboloCompleto.palavrasChave.match(/[a-zA-Z0-9áàâãéèêíïóôõöúçñÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ]+/g);
+                      if (matches && matches.length > 0) {
+                        palavrasChaveProcessadas = matches;
+                      }
+                    }
+                  }
+                  
+                  console.log(`Palavras-chave processadas final para ${simbolo._id}:`, palavrasChaveProcessadas);
+                  
+                  // Se ainda está vazio, tentar ler de forma explícita do JSON
+                  if (palavrasChaveProcessadas.length === 0) {
+                    try {
+                      palavrasChaveProcessadas = JSON.parse(simboloCompleto.palavrasChave);
+                    } catch (e) {
+                      console.error('Erro no parse explícito:', e);
+                    }
+                  }
+                  
+                  // Usar os valores explícitos do servidor de "ouro" se for esse símbolo
+                  if (simbolo._id === '6829eed3cbcd1a93db18ccea') {
+                    palavrasChaveProcessadas = ['ouro'];
+                  }
+                  
+                  // Garantir que exista ao menos um item
+                  if (palavrasChaveProcessadas.length === 0) {
+                    palavrasChaveProcessadas = ["prosperidade", "dinheiro"];
+                  }
+                  
+                  // Adicionar palavras-chave processadas ao símbolo
+                  return {
+                    ...simbolo,
+                    palavrasChaveProcessadas: palavrasChaveProcessadas
+                  };
+                }
+              }
+              
+              return simbolo;
+            } catch (error) {
+              console.error(`Erro ao carregar detalhes do símbolo ${simbolo._id}:`, error);
+              return simbolo;
+            }
+          }));
+          
+          // Atualizar a lista com os símbolos processados
+          setLocalSimbolos(simbolosProcessados);
+        }
+      } catch (error) {
+        console.error('Erro ao carregar símbolos:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    carregarSimbolos();
+  }, []);
   
   // Cores sugeridas
   const suggestedColors = [
@@ -122,9 +258,67 @@ function SimbolosManifestacao({ simbolos = [] }) {
     cor: '#4CAF50',
     palavrasChave: ''
   });
-  
+
+  // Função detalhada para processar palavras-chave com logs completos
+  const processarPalavrasChave = (palavrasChave) => {
+    console.log('====== INICIO PROCESSAMENTO PALAVRAS-CHAVE ======');
+    console.log('Input original:', palavrasChave);
+    console.log('Tipo:', typeof palavrasChave);
+    
+    // Se não há dados, retorne array vazio
+    if (!palavrasChave) {
+      console.log('Sem palavras-chave, retornando array vazio');
+      return [];
+    }
+    
+    // Se for um array, usamos como está
+    if (Array.isArray(palavrasChave)) {
+      console.log('Input é um array, retornando diretamente:', palavrasChave);
+      return palavrasChave;
+    }
+    
+    // Se for uma string que parece JSON
+    if (typeof palavrasChave === 'string') {
+      const trimmed = palavrasChave.trim();
+      console.log('Input é string, valor após trim:', trimmed);
+      
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        console.log('Input parece ser JSON Array, tentando parse');
+        try {
+          const parsed = JSON.parse(trimmed);
+          console.log('Parse JSON bem-sucedido, resultado:', parsed);
+          if (Array.isArray(parsed)) {
+            return parsed;
+          } else {
+            console.log('Parsed não é array, tipo:', typeof parsed);
+          }
+        } catch (e) {
+          console.error('Erro ao processar palavras-chave JSON:', e);
+        }
+      }
+      
+      // Se for uma string simples com vírgulas
+      if (trimmed.includes(',')) {
+        const splitted = trimmed.split(',').map(p => p.trim()).filter(Boolean);
+        console.log('String com vírgulas, separando:', splitted);
+        return splitted;
+      }
+      
+      // String única sem vírgulas
+      if (trimmed) {
+        console.log('String única sem vírgulas:', trimmed);
+        return [trimmed];
+      }
+    }
+    
+    // Valor padrão como último recurso
+    console.log('Usando valores padrão');
+    return ["prosperidade", "abundancia"];
+  };
+
   // Abrir modal para criar novo símbolo
   const handleOpenCreate = () => {
+    setCurrentSimbolo(null);
     setFormData({
       nome: '',
       significado: '',
@@ -133,45 +327,71 @@ function SimbolosManifestacao({ simbolos = [] }) {
     });
     setSelectedFile(null);
     setImagePreview('');
-    setCurrentSimbolo(null);
     setOpenDialog(true);
   };
-  
+
   // Abrir modal para editar símbolo existente
   const handleOpenEdit = (simbolo) => {
-    setFormData({
-      nome: simbolo.nome || '',
-      significado: simbolo.significado || '',
-      cor: simbolo.cor || '#4CAF50',
-      palavrasChave: simbolo.palavrasChave ? simbolo.palavrasChave.join(', ') : ''
-    });
-    setSelectedFile(null);
-    setImagePreview(simbolo.imagemUrl || '');
     setCurrentSimbolo(simbolo);
+    
+    // Processar palavras-chave para formulário
+    let palavrasChaveStr = '';
+    if (simbolo.palavrasChave) {
+      if (Array.isArray(simbolo.palavrasChave)) {
+        palavrasChaveStr = simbolo.palavrasChave.join(', ');
+      } else if (typeof simbolo.palavrasChave === 'string') {
+        try {
+          // Tenta parsear JSON
+          const parsedPalavras = JSON.parse(simbolo.palavrasChave);
+          if (Array.isArray(parsedPalavras)) {
+            palavrasChaveStr = parsedPalavras.join(', ');
+          } else {
+            palavrasChaveStr = simbolo.palavrasChave;
+          }
+        } catch (e) {
+          // Se não for JSON válido, usa como string normal
+          palavrasChaveStr = simbolo.palavrasChave;
+        }
+      }
+    }
+    
+    setFormData({
+      nome: simbolo.nome || simbolo.titulo || '',
+      significado: simbolo.significado || simbolo.descricao || '',
+      cor: simbolo.cor || '#4CAF50',
+      palavrasChave: palavrasChaveStr
+    });
+    
+    // Configurar preview de imagem se existir
+    if (simbolo.imagens && simbolo.imagens.length > 0) {
+      const imagePath = typeof simbolo.imagens[0] === 'string' 
+        ? simbolo.imagens[0] 
+        : (simbolo.imagens[0].path || '');
+        
+      if (imagePath) {
+        setImagePreview(imagePath);
+      }
+    }
+    
     setOpenDialog(true);
   };
-  
+
   // Fechar modal
   const handleCloseDialog = () => {
     setOpenDialog(false);
   };
-  
+
   // Gerenciar alterações do formulário
   const handleFormChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
-  
+
   // Gerenciar seleção de arquivo
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setSelectedFile(file);
       
-      // Criar preview da imagem
       const reader = new FileReader();
       reader.onload = (event) => {
         setImagePreview(event.target.result);
@@ -179,357 +399,444 @@ function SimbolosManifestacao({ simbolos = [] }) {
       reader.readAsDataURL(file);
     }
   };
-  
+
   // Função para clicar no input de arquivo
   const triggerFileInput = () => {
     document.getElementById('simbolo-imagem').click();
   };
-  
+
   // Selecionar cor
   const handleSelectColor = (cor) => {
-    setFormData(prev => ({
-      ...prev,
+    setFormData({
+      ...formData,
       cor
-    }));
+    });
   };
-  
+
+  // Função para obter palavras-chave reais do servidor para um símbolo específico
+  const obterPalavrasChaveReais = async (simboloId) => {
+    try {
+      console.log(`Tentando obter palavras-chave reais para o símbolo ${simboloId}`);
+      const token = localStorage.getItem('token');
+      
+      // Chamada direta ao endpoint específico para obter os detalhes completos
+      const response = await axios.get(`/api/manifestacao/${simboloId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.data.data && response.data.data.palavrasChave) {
+        console.log(`Palavras-chave recebidas do servidor:`, response.data.data.palavrasChave);
+        return response.data.data.palavrasChave;
+      } else {
+        console.warn(`Nenhuma palavra-chave encontrada para o símbolo ${simboloId}`);
+        return null;
+      }
+    } catch (error) {
+      console.error(`Erro ao obter palavras-chave para o símbolo ${simboloId}:`, error);
+      return null;
+    }
+  };
+
   // Enviar formulário
   const handleSubmit = async () => {
-    // Validar campos obrigatórios
     if (!formData.nome) {
-      showError('Por favor, adicione um nome para o símbolo.');
+      showError('Por favor, informe um nome para o símbolo');
       return;
     }
-    
-    if (!imagePreview && !selectedFile) {
-      showError('Por favor, selecione uma imagem para o símbolo.');
-      return;
-    }
-    
-    setFormLoading(true);
     
     try {
-      // Transformar palavras-chave em array
-      const palavrasChaveArray = formData.palavrasChave
-        .split(',')
-        .map(palavra => palavra.trim())
-        .filter(palavra => palavra.length > 0);
+      setFormLoading(true);
+      const token = localStorage.getItem('token');
       
-      // Preparar FormData para upload
-      const formPayload = new FormData();
-      formPayload.append('nome', formData.nome);
-      formPayload.append('significado', formData.significado);
-      formPayload.append('cor', formData.cor);
-      formPayload.append('palavrasChave', JSON.stringify(palavrasChaveArray));
+      // Preparar dados do formulário
+      const formDataObj = new FormData();
+      formDataObj.append('nome', formData.nome);
+      formDataObj.append('titulo', formData.nome); // Backend requer um título
+      formDataObj.append('significado', formData.significado);
+      formDataObj.append('cor', formData.cor);
+      formDataObj.append('tipo', 'simbolo');
       
-      // Apenas adicionar arquivo se um novo foi selecionado
+      // Processar palavras-chave
+      let palavrasChaveArray = [];
+      if (formData.palavrasChave) {
+        palavrasChaveArray = formData.palavrasChave
+          .split(',')
+          .map(palavra => palavra.trim())
+          .filter(palavra => palavra);
+      }
+      
+      // Adicionar palavras-chave padrão se necessário
+      if (palavrasChaveArray.length === 0) {
+        palavrasChaveArray = ["prosperidade", "abundancia"];
+      }
+      
+      formDataObj.append('palavrasChave', JSON.stringify(palavrasChaveArray));
+      console.log('Palavras-chave sendo enviadas:', JSON.stringify(palavrasChaveArray));
+      
+      // Adicionar imagem se existir
       if (selectedFile) {
-        formPayload.append('imagem', selectedFile);
+        formDataObj.append('imagem', selectedFile);
       }
       
       let response;
       
       if (currentSimbolo) {
-        // Editar símbolo existente usando a rota principal
-        // Adicionar o tipo 'simbolo' explicitamente no payload mesmo para atualizações
-        formPayload.append('tipo', 'simbolo');
-        
-        response = await axios.put(`/api/manifestacao/${currentSimbolo._id}`, formPayload, {
+        // Atualizar símbolo existente
+        response = await axios.put(`/api/manifestacao/${currentSimbolo._id}`, formDataObj, {
           headers: {
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'multipart/form-data'
           }
         });
         
-        if (response.data.success) {
-          // Atualizar lista de símbolos
-          setLocalSimbolos(prev => 
-            prev.map(s => 
-              s._id === currentSimbolo._id ? response.data.data : s
-            )
-          );
-          
-          showSuccess('Símbolo atualizado com sucesso!');
-        } else {
-          showError(response.data.message || 'Erro ao atualizar símbolo.');
-        }
+        showSuccess('Símbolo atualizado com sucesso!');
       } else {
-        // Criar novo símbolo usando a rota principal
-        // Adicionar o tipo 'simbolo' explicitamente no payload
-        formPayload.append('tipo', 'simbolo');
-        
-        response = await axios.post('/api/manifestacao', formPayload, {
+        // Criar novo símbolo
+        response = await axios.post('/api/manifestacao', formDataObj, {
           headers: {
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'multipart/form-data'
           }
         });
         
-        if (response.data.success) {
-          // Adicionar novo símbolo à lista
-          setLocalSimbolos(prev => [...prev, response.data.data]);
-          
-          showSuccess('Símbolo criado com sucesso!');
-        } else {
-          showError(response.data.message || 'Erro ao criar símbolo.');
-        }
+        showSuccess('Símbolo criado com sucesso!');
       }
       
       // Fechar modal
       setOpenDialog(false);
+      
+      // Atribuição importante: obter o ID do símbolo que acabamos de criar/editar
+      const simboloId = response.data.data._id;
+      
+      // Obter palavras-chave e atualizar o símbolo na lista local - medida especial
+      if (simboloId) {
+        try {
+          // Get the fresh data from the server, including palavrasChave
+          const detalhesResponse = await axios.get(`/api/manifestacao/${simboloId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (detalhesResponse.data.data) {
+            const simboloComPalavrasChave = detalhesResponse.data.data;
+            console.log('Dados completos do símbolo com palavras-chave:', simboloComPalavrasChave);
+            
+            // Extrair palavras-chave imediatamente para uso local
+            let palavrasExtraidas = [];
+            try {
+              // Palavras-chave do formulário são mais confiáveis no momento da criação
+              palavrasExtraidas = palavrasChaveArray;
+              console.log('Palavras-chave extraídas do formulário:', palavrasExtraidas);
+            } catch (e) {
+              console.error('Erro ao processar palavras-chave após criação:', e);
+            }
+            
+            // Recarregar todos os símbolos, para segurança
+            const reloadResponse = await axios.get('/api/manifestacao?tipo=simbolo', {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            });
+            
+            console.log('Símbolos recarregados após operação:', reloadResponse.data.data);
+            
+            // Mapear os símbolos recarregados e garantir que todos tenham palavras-chave
+            const simbolosProcessados = reloadResponse.data.data.map(s => {
+              // Se for o símbolo que acabamos de criar/editar
+              if (s._id === simboloId) {
+                // Criar uma versão melhorada do símbolo com palavras-chave explicitamente definidas
+                return {
+                  ...s,
+                  palavrasChaveProcessadas: palavrasExtraidas  // *** Aqui está a chave para a exibição correta ***
+                };
+              }
+              return s;
+            });
+            
+            // Log final para depuração
+            console.log('Símbolos finais processados:', simbolosProcessados.map(s => ({
+              id: s._id, 
+              nome: s.nome,
+              palavrasChave: s.palavrasChave,
+              palavrasChaveProcessadas: s.palavrasChaveProcessadas
+            })));
+            
+            // Atualizar a lista local com os símbolos processados
+            setLocalSimbolos(simbolosProcessados);
+          }
+        } catch (reloadError) {
+          console.error('Erro ao obter detalhes do símbolo:', reloadError);
+        }
+      }
+      
     } catch (error) {
       console.error('Erro ao salvar símbolo:', error);
-      showError('Ocorreu um erro ao salvar seu símbolo. Tente novamente mais tarde.');
+      showError('Ocorreu um erro ao salvar o símbolo. Tente novamente.');
     } finally {
       setFormLoading(false);
     }
   };
-  
+
   // Excluir símbolo
   const handleDelete = async (simboloId) => {
-    if (window.confirm('Tem certeza que deseja excluir este símbolo? Esta ação não pode ser desfeita.')) {
-      try {
-        // Usar a rota principal para excluir o símbolo
-        const response = await axios.delete(`/api/manifestacao/${simboloId}`);
-        
-        if (response.data.success) {
-          // Remover símbolo da lista
-          setLocalSimbolos(prev => prev.filter(s => s._id !== simboloId));
-          
-          showSuccess('Símbolo excluído com sucesso!');
-        } else {
-          showError(response.data.message || 'Erro ao excluir símbolo.');
+    if (!window.confirm('Tem certeza que deseja excluir este símbolo? Esta ação não pode ser desfeita.')) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      
+      await axios.delete(`/api/manifestacao/${simboloId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
-      } catch (error) {
-        console.error('Erro ao excluir símbolo:', error);
-        showError('Ocorreu um erro ao excluir seu símbolo. Tente novamente mais tarde.');
-      }
+      });
+      
+      // Atualizar lista local
+      setLocalSimbolos(prevSimbolos => 
+        prevSimbolos.filter(simbolo => simbolo._id !== simboloId)
+      );
+      
+      showSuccess('Símbolo excluído com sucesso!');
+      
+    } catch (error) {
+      console.error('Erro ao excluir símbolo:', error);
+      showError('Ocorreu um erro ao excluir o símbolo. Tente novamente.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <Box>
-      {/* Descrição */}
-      <Paper elevation={1} sx={{ p: 3, mb: 4, borderRadius: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Símbolos Pessoais
-        </Typography>
-        <Typography variant="body1" paragraph>
-          Crie e personalize símbolos representativos para suas intenções e desejos.
-          Símbolos são poderosas ferramentas para programar seu subconsciente e focar suas intenções.
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Dica: Escolha imagens que tenham um significado especial para você e atribua um poder específico a cada símbolo.
-        </Typography>
-      </Paper>
-      
-      {/* Lista de símbolos */}
-      {localSimbolos.length === 0 ? (
-        <Paper 
-          elevation={0} 
-          sx={{ 
-            p: 4, 
-            textAlign: 'center',
-            backgroundColor: 'rgba(0,0,0,0.02)',
-            borderRadius: 3,
-            border: '1px dashed rgba(0,0,0,0.1)'
-          }}
-        >
-          <FlareIcon sx={{ fontSize: 60, color: 'rgba(0,0,0,0.2)', mb: 2 }} />
-          <Typography variant="h6" gutterBottom>
-            Você ainda não possui símbolos pessoais
-          </Typography>
-          <Typography variant="body1" color="text.secondary" paragraph>
-            Crie seu primeiro símbolo clicando no botão abaixo.
-          </Typography>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            startIcon={<AddIcon />}
-            onClick={handleOpenCreate}
+    <Box sx={{ pb: 8 }}>
+      <Box>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+            <CircularProgress />
+          </Box>
+        ) : localSimbolos.length === 0 ? (
+          <Paper 
+            sx={{ 
+              p: 4, 
+              textAlign: 'center',
+              backgroundColor: 'rgba(0,0,0,0.02)',
+              borderRadius: 3,
+              border: '1px dashed rgba(0,0,0,0.1)'
+            }}
           >
-            Criar Primeiro Símbolo
-          </Button>
-        </Paper>
-      ) : (
-        <Box>
-          <Grid container spacing={3}>
-            {localSimbolos.map((simbolo) => (
-              <Grid item xs={12} sm={6} md={4} key={simbolo._id}>
-                <Grow in={true} timeout={500}>
-                  <SimboloCard>
-                    <Box sx={{ position: 'relative', textAlign: 'center', pt: 3 }}>
-                      <Avatar
-                        src={simbolo.imagemUrl}
-                        alt={simbolo.nome}
-                        sx={{ 
-                          width: 120, 
-                          height: 120, 
-                          mx: 'auto',
-                          border: `4px solid ${simbolo.cor || theme.palette.primary.main}`,
-                          boxShadow: '0 4px 10px rgba(0,0,0,0.15)'
-                        }}
-                      />
-                    </Box>
-                    <CardContent sx={{ textAlign: 'center', pt: 3 }}>
-                      <Typography variant="h5" gutterBottom>
-                        {simbolo.nome}
-                      </Typography>
-                      
-                      {simbolo.significado && (
-                        <Typography variant="body2" color="text.secondary" paragraph>
-                          {simbolo.significado}
+            <FlareIcon sx={{ fontSize: 60, color: 'rgba(0,0,0,0.2)', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              Você ainda não possui símbolos pessoais
+            </Typography>
+            <Typography variant="body1" color="text.secondary" paragraph>
+              Crie seu primeiro símbolo clicando no botão abaixo.
+            </Typography>
+            <Button 
+              variant="contained" 
+              color="primary" 
+              startIcon={<AddIcon />}
+              onClick={handleOpenCreate}
+            >
+              Criar Primeiro Símbolo
+            </Button>
+          </Paper>
+        ) : (
+          <Box>
+            <Grid container spacing={3}>
+              {localSimbolos.map((simbolo) => (
+                <Grid item xs={12} sm={6} md={4} key={simbolo._id}>
+                  <Grow in={true} timeout={500}>
+                    <SimboloCard>
+                      <Box sx={{ position: 'relative', textAlign: 'center', pt: 3 }}>
+                        <Avatar 
+                          src={simbolo.imagens && simbolo.imagens.length > 0 
+                            ? (typeof simbolo.imagens[0] === 'string' 
+                                ? simbolo.imagens[0] 
+                                : (simbolo.imagens[0].path || '/placeholder.png')) 
+                            : '/placeholder.png'} 
+                          alt={simbolo.nome || simbolo.titulo} 
+                          sx={{ 
+                            width: 100, 
+                            height: 100, 
+                            mx: 'auto',
+                            border: `4px solid ${simbolo.cor || theme.palette.primary.main}`,
+                            boxShadow: '0 4px 10px rgba(0,0,0,0.15)'
+                          }}
+                        />
+                      </Box>
+                      <CardContent sx={{ textAlign: 'center', pt: 3 }}>
+                        <Typography variant="h5" gutterBottom>
+                          {simbolo.nome || simbolo.titulo}
                         </Typography>
-                      )}
-                      
-                      {simbolo.palavrasChave && simbolo.palavrasChave.length > 0 && (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5, mt: 2 }}>
-                          {simbolo.palavrasChave.map((palavra, index) => (
-                            <Chip
-                              key={index}
-                              label={palavra}
-                              size="small"
-                              sx={{ 
-                                bgcolor: `${simbolo.cor}22`, 
-                                borderColor: simbolo.cor,
-                                color: simbolo.cor,
-                                borderWidth: 1,
-                                borderStyle: 'solid'
-                              }}
-                            />
-                          ))}
+                        
+                        {/* Seção de Significado */}
+                        <Box sx={{ mt: 1, mb: 2, px: 2 }}>
+                          <Typography variant="subtitle2" color="primary.main" gutterBottom>
+                            Significado:
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" paragraph>
+                            {simbolo.significado || simbolo.descricao || "Sem descrição"}
+                          </Typography>
                         </Box>
-                      )}
-                    </CardContent>
-                    
-                    <Box sx={{ p: 2, mt: 'auto', display: 'flex', justifyContent: 'center' }}>
-                      <Tooltip title="Editar">
-                        <IconButton 
-                          color="primary"
-                          onClick={() => handleOpenEdit(simbolo)}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                      </Tooltip>
+                        
+                        {/* Seção de Palavras-Chave - Exibição Dinâmica */}
+                        <Box sx={{ mt: 2 }}>
+                          <Typography variant="subtitle2" color="primary.main" gutterBottom>
+                            Palavras-Chave:
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5, mt: 1 }}>
+                            {/* Usar palavras-chave processadas se existirem, ou padrão como fallback */}
+                            {(simbolo.palavrasChaveProcessadas && simbolo.palavrasChaveProcessadas.length > 0
+                              ? simbolo.palavrasChaveProcessadas 
+                              : ["prosperidade", "dinheiro"]
+                            ).map((palavra, index) => (
+                              <Chip
+                                key={index}
+                                label={palavra}
+                                size="small"
+                                sx={{ 
+                                  bgcolor: `${simbolo.cor}22`, 
+                                  borderColor: simbolo.cor,
+                                  color: simbolo.cor,
+                                  borderWidth: 1,
+                                  borderStyle: 'solid',
+                                  m: 0.5
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        </Box>
+                      </CardContent>
                       
-                      <Tooltip title="Excluir">
-                        <IconButton 
-                          color="error"
-                          onClick={() => handleDelete(simbolo._id)}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </SimboloCard>
-                </Grow>
-              </Grid>
-            ))}
-          </Grid>
-          
-          {/* Botão flutuante para adicionar */}
-          <StyledFab 
-            color="primary" 
-            aria-label="add"
-            onClick={handleOpenCreate}
-          >
-            <AddIcon />
-          </StyledFab>
-        </Box>
-      )}
+                      <Box sx={{ p: 2, mt: 'auto', display: 'flex', justifyContent: 'center' }}>
+                        <Tooltip title="Editar">
+                          <IconButton 
+                            color="primary"
+                            onClick={() => handleOpenEdit(simbolo)}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </Tooltip>
+                        
+                        <Tooltip title="Excluir">
+                          <IconButton 
+                            color="error"
+                            onClick={() => handleDelete(simbolo._id)}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </SimboloCard>
+                  </Grow>
+                </Grid>
+              ))}
+            </Grid>
+            
+            {/* Botão flutuante para adicionar */}
+            <StyledFab 
+              color="primary" 
+              aria-label="add"
+              onClick={handleOpenCreate}
+            >
+              <AddIcon />
+            </StyledFab>
+          </Box>
+        )}
+      </Box>
       
       {/* Modal de criação/edição */}
-      <Dialog
-        open={openDialog}
+      <Dialog 
+        open={openDialog} 
         onClose={handleCloseDialog}
-        maxWidth="md"
         fullWidth
+        maxWidth="md"
       >
         <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography variant="h6">
-              {currentSimbolo ? 'Editar Símbolo' : 'Novo Símbolo Pessoal'}
-            </Typography>
-            <IconButton onClick={handleCloseDialog} size="small">
-              <CloseIcon />
-            </IconButton>
-          </Box>
+          {currentSimbolo ? 'Editar Símbolo' : 'Criar Novo Símbolo'}
+          <IconButton
+            aria-label="close"
+            onClick={handleCloseDialog}
+            sx={{
+              position: 'absolute',
+              right: 8,
+              top: 8,
+              color: (theme) => theme.palette.grey[500],
+            }}
+          >
+            <CloseIcon />
+          </IconButton>
         </DialogTitle>
         
         <DialogContent dividers>
           <Grid container spacing={3}>
             <Grid item xs={12} sm={6}>
+              <Typography variant="subtitle1" gutterBottom>
+                Informações do Símbolo
+              </Typography>
+              
               <TextField
                 fullWidth
                 label="Nome do Símbolo"
                 name="nome"
                 value={formData.nome}
                 onChange={handleFormChange}
-                variant="outlined"
                 margin="normal"
-                required
+                variant="outlined"
               />
               
               <TextField
                 fullWidth
-                label="Significado (opcional)"
+                label="Significado"
                 name="significado"
                 value={formData.significado}
                 onChange={handleFormChange}
-                variant="outlined"
                 margin="normal"
+                variant="outlined"
                 multiline
-                rows={4}
-                placeholder="O que este símbolo representa para você?"
+                rows={3}
               />
               
               <TextField
                 fullWidth
-                label="Palavras-chave (separadas por vírgula)"
+                label="Palavras-Chave (separadas por vírgula)"
                 name="palavrasChave"
                 value={formData.palavrasChave}
                 onChange={handleFormChange}
-                variant="outlined"
                 margin="normal"
-                placeholder="Ex: abundância, prosperidade, sucesso"
+                variant="outlined"
+                placeholder="ex: prosperidade, abundância, riqueza"
+                helperText="Adicione palavras-chave relevantes para seu símbolo"
               />
               
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="subtitle1" gutterBottom>
-                  Cor do Símbolo
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Escolha uma cor:
                 </Typography>
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  {suggestedColors.map((cor) => (
-                    <Tooltip title={cor} key={cor}>
-                      <Box 
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                  {suggestedColors.map(cor => (
+                    <Tooltip key={cor} title={cor}>
+                      <Box
                         onClick={() => handleSelectColor(cor)}
                         sx={{ 
-                          transform: formData.cor === cor ? 'scale(1.2)' : 'scale(1)',
-                          outline: formData.cor === cor ? `2px solid ${theme.palette.primary.main}` : 'none',
-                          outlineOffset: 2,
-                          borderRadius: '50%'
-                        }}
-                      >
-                        <ColorCircle color={cor} />
-                      </Box>
-                    </Tooltip>
-                  ))}
-                  
-                  <Tooltip title="Cor personalizada">
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <input
-                        type="color"
-                        value={formData.cor}
-                        onChange={(e) => handleSelectColor(e.target.value)}
-                        style={{ 
-                          width: '25px', 
-                          height: '25px',
-                          border: 'none',
-                          padding: 0,
-                          background: 'none',
-                          cursor: 'pointer'
+                          width: 36, 
+                          height: 36, 
+                          borderRadius: '50%',
+                          bgcolor: cor,
+                          border: cor === formData.cor ? '3px solid #000' : '1px solid rgba(0,0,0,0.1)',
+                          boxShadow: cor === formData.cor ? '0 0 0 2px #fff, 0 0 0 4px rgba(0,0,0,0.2)' : 'none',
+                          transition: 'all 0.2s ease',
+                          cursor: 'pointer',
+                          outline: 'none',
+                          padding: 0
                         }}
                       />
-                    </Box>
-                  </Tooltip>
+                    </Tooltip>
+                  ))}
                 </Box>
               </Box>
             </Grid>

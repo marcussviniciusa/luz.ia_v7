@@ -5,9 +5,20 @@ const User = require('../models/User');
 
 // Proteger rotas
 exports.protect = asyncHandler(async (req, res, next) => {
-  // Verifica se é uma rota de imagem ou recurso público
-  if (req.path.includes('/public/') || req.path.includes('/images/') || req.path.includes('/uploads/')) {
-    console.log('Rota de imagem ou recurso público detectada, ignorando autenticação:', req.path);
+  // Verifica se é uma rota de imagem, proxy ou recurso público
+  const isPublicPath = 
+      req.path.includes('/public/') || 
+      req.path.includes('/images/') || 
+      req.path.includes('/uploads/') || 
+      req.path.includes('/proxy/') || 
+      req.path.includes('/api/proxy/') ||
+      req.path.includes('/minio/') ||
+      req.path.includes('/perfil/foto') ||
+      req.originalUrl.includes('/perfil/foto');
+      
+  // Permitir acesso a imagens e recursos públicos sem autenticação
+  if (isPublicPath) {
+    console.log('Rota de imagem, proxy ou recurso público detectada, ignorando autenticação:', req.path);
     return next();
   }
   

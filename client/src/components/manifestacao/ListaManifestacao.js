@@ -291,7 +291,22 @@ function ListaManifestacao({ listas = [] }) {
         return;
       }
       
-      // Usar a rota principal para atualizar o status do passo
+      // IMPORTANTE: Atualizar visualmente a interface ANTES de chamar a API
+      // para fornecer feedback imediato ao usuário
+      setLocalListas(prev => 
+        prev.map(lista => {
+          if (lista._id === listaId) {
+            const novosPassos = [...lista.passos];
+            novosPassos[passoIndex] = { 
+              ...novosPassos[passoIndex], 
+              concluido: novoStatus 
+            };
+            return { ...lista, passos: novosPassos };
+          }
+          return lista;
+        })
+      );
+      
       // Criar dados para atualizar o passo
       const passoData = {
         descricao: listaAtual.passos[passoIndex].descricao,
@@ -299,24 +314,27 @@ function ListaManifestacao({ listas = [] }) {
         dataLimite: listaAtual.passos[passoIndex].dataLimite
       };
       
-      // Usar a rota de atualização de passo
+      // Chamar a API para persistir a mudança no servidor
       const response = await axios.put(`/api/manifestacao/${listaId}/passo/${listaAtual.passos[passoIndex]._id}`, passoData);
       
-      if (response.data.success) {
-        // Atualizar lista localmente
+      // Se a API falhar, reverter a mudança visual
+      if (!response.data.success) {
+        showError(response.data.message || 'Erro ao atualizar item.');
+        
+        // Reverter a alteração feita anteriormente
         setLocalListas(prev => 
           prev.map(lista => {
             if (lista._id === listaId) {
               const novosPassos = [...lista.passos];
-              novosPassos[passoIndex] = { ...novosPassos[passoIndex], completo: novoStatus };
+              novosPassos[passoIndex] = { 
+                ...novosPassos[passoIndex], 
+                concluido: !novoStatus // Volta ao estado anterior
+              };
               return { ...lista, passos: novosPassos };
-              return response.data.data;
             }
             return lista;
           })
         );
-      } else {
-        showError(response.data.message || 'Erro ao atualizar item.');
       }
     } catch (error) {
       console.error('Erro ao atualizar status do item:', error);

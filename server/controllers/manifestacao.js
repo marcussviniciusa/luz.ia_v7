@@ -36,6 +36,45 @@ exports.createManifestacao = asyncHandler(async (req, res, next) => {
     user: req.user.id
   };
   
+  // Processamento específico para símbolos
+  if (req.body.tipo === 'simbolo') {
+    // Garantir compatibilidade entre nome e título
+    if (req.body.nome && !req.body.titulo) {
+      manifestacaoData.titulo = req.body.nome;
+    }
+    else if (req.body.titulo && !req.body.nome) {
+      manifestacaoData.nome = req.body.titulo;
+    }
+    
+    // Garantir que o significado seja armazenado no campo descricao para compatibilidade
+    if (req.body.significado) {
+      manifestacaoData.descricao = req.body.significado;
+    }
+    else if (req.body.descricao && !req.body.significado) {
+      manifestacaoData.significado = req.body.descricao;
+    }
+    
+    // Certificar-se de que as palavras-chave sejam armazenadas corretamente
+    if (req.body.palavrasChave) {
+      try {
+        // Se for uma string JSON, mantenha-a como está
+        if (typeof req.body.palavrasChave === 'string') {
+          // Verificar se é um JSON válido
+          JSON.parse(req.body.palavrasChave);
+          // Se não lançou erro, está ok
+          console.log('PalavrasChave processadas com sucesso:', req.body.palavrasChave);
+        }
+      } catch (error) {
+        // Se não for um JSON válido, converter para array e depois para JSON
+        console.log('Erro ao processar palavrasChave, convertendo para array:', error);
+        manifestacaoData.palavrasChave = JSON.stringify([req.body.palavrasChave]);
+      }
+    }
+    
+    // Log para debug
+    console.log('Dados processados do símbolo:', manifestacaoData);
+  }
+  
   // Processar afirmação positiva (se fornecida)
   if (req.body.afirmacao) {
     // Converter o campo 'afirmacao' em um array 'afirmacoes'
@@ -216,6 +255,7 @@ exports.updateManifestacao = asyncHandler(async (req, res, next) => {
 // @route   DELETE /api/manifestacao/:id
 // @access  Private
 exports.deleteManifestacao = asyncHandler(async (req, res, next) => {
+  console.log('Tentando excluir manifestação com ID:', req.params.id);
   const manifestacao = await Manifestacao.findById(req.params.id);
   
   if (!manifestacao) {

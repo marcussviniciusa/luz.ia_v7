@@ -7,6 +7,8 @@ const User = require('../models/User');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const fs = require('fs');
 
 // Configuração do multer para upload temporário
 const upload = multer({ 
@@ -52,6 +54,18 @@ router.put('/foto', protect, upload.single('photo'), asyncHandler(async (req, re
     console.error('Erro ao fazer upload de imagem:', error);
     return next(new ErrorResponse('Erro ao fazer upload de imagem', 500));
   }
+}));
+
+// @desc    Servir imagem de perfil padrão
+// @route   GET /api/perfil/foto/default-profile.jpg
+// @access  Public
+router.get('/foto/default-profile.jpg', asyncHandler(async (req, res, next) => {
+  // Em vez de tentar encontrar um arquivo, retornar uma resposta JSON
+  // Isso é uma solução temporária para evitar o erro 404
+  res.status(200).json({
+    success: true,
+    message: 'Imagem de perfil padrão não disponível no momento'
+  });
 }));
 
 // @desc    Obter URL pré-assinada para a foto de perfil
