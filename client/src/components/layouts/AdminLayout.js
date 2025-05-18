@@ -45,6 +45,9 @@ const AdminBg = styled.div`
   background-image: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.2) 100%);
   position: relative;
   overflow: hidden;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   
   &::before {
     content: "";
@@ -81,6 +84,17 @@ function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   
+  // Estilos simplificados para o layout
+  const mainContentStyle = {
+    flexGrow: 1,
+    width: { md: `calc(100% - ${drawerWidth}px)` },
+    ml: { md: `${drawerWidth}px` },
+    p: 3, // Padding uniforme em todos os lados
+    pt: { xs: 8, sm: 9 }, // Padding extra no topo para compensar o AppBar
+    minHeight: '100vh',
+  };
+  
+  
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
@@ -116,8 +130,8 @@ function AdminLayout() {
   
   // Drawer content (sidebar)
   const drawer = (
-    <AdminBg>
-      <Box sx={{ overflow: 'auto', height: '100%', color: 'text.light' }}>
+    <AdminBg sx={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ overflow: 'auto', flex: 1, color: 'text.light', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ 
           display: 'flex', 
           flexDirection: 'column', 
@@ -218,18 +232,17 @@ function AdminLayout() {
     <Box sx={{ display: 'flex' }}>
       <CssBaseline />
       
-      {/* App Bar */}
+      {/* AppBar superior */}
       <AppBar
         position="fixed"
         sx={{
           width: { md: `calc(100% - ${drawerWidth}px)` },
           ml: { md: `${drawerWidth}px` },
-          backgroundColor: '#FFFFFF',
-          color: theme.palette.text.primary,
-          boxShadow: '0 2px 10px rgba(0,0,0,0.05)'
+          backgroundColor: '#0c2816', // Verde escuro para o header admin
+          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ justifyContent: 'space-between' }}>
           <IconButton
             color="inherit"
             aria-label="abrir menu"
@@ -239,38 +252,24 @@ function AdminLayout() {
           >
             <MenuIcon />
           </IconButton>
-          
-          <Typography 
-            variant="h6" 
-            noWrap 
-            component="div" 
-            sx={{ 
-              flexGrow: 1,
-              display: 'flex',
-              alignItems: 'center'
-            }}
-          >
-            <Box 
-              component="span" 
-              sx={{ 
-                color: theme.palette.primary.main,
-                mr: 1,
-                fontWeight: 'bold'
-              }}
-            >
-              Admin:
-            </Box>
-            {menuItems.find(item => item.path === location.pathname)?.text || 'Administração'}
+          <Typography variant="h6" noWrap component="div">
+            <Box component="span" sx={{ fontWeight: 'bold', mr: 1 }}>Admin:</Box>
+            {location.pathname === '/admin' ? 'Dashboard' : 
+             location.pathname === '/admin/users' ? 'Usuários' :
+             location.pathname === '/admin/content' ? 'Conteúdo' :
+             location.pathname === '/admin/luzia' ? 'LUZ IA' :
+             location.pathname === '/admin/practices' ? 'Práticas' :
+             location.pathname === '/admin/stats' ? 'Estatísticas' : 'Admin'}
           </Typography>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box>
             <IconButton
-              onClick={handleProfileMenuOpen}
-              size="small"
               edge="end"
               aria-label="perfil do administrador"
               aria-haspopup="true"
+              onClick={handleProfileMenuOpen}
               color="inherit"
+              size="small"
+              sx={{ ml: 2 }}
             >
               <Avatar
                 sx={{ 
@@ -342,50 +341,40 @@ function AdminLayout() {
         </MenuItem>
       </Menu>
       
-      {/* Sidebar / Drawer */}
-      <Box
-        component="nav"
-        sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
-      >
-        {/* Mobile drawer */}
-        <Drawer
-          variant="temporary"
-          open={mobileOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{ keepMounted: true }}
-          sx={{
-            display: { xs: 'block', md: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
-          }}
-        >
-          {drawer}
-        </Drawer>
-        
-        {/* Desktop drawer */}
-        <Drawer
-          variant="permanent"
-          sx={{
-            display: { xs: 'none', md: 'block' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
-          }}
-          open
-        >
-          {drawer}
-        </Drawer>
-      </Box>
-      
-      {/* Main content */}
-      <Box
-        component="main"
+      {/* Sidebar - Versão mobile */}
+      <Drawer
+        variant="temporary"
+        open={mobileOpen}
+        onClose={handleDrawerToggle}
+        ModalProps={{ keepMounted: true }}
         sx={{
-          flexGrow: 1,
-          p: 3,
-          width: { md: `calc(100% - ${drawerWidth}px)` },
-          minHeight: '100vh',
-          backgroundColor: theme.palette.background.default
+          display: { xs: 'block', md: 'none' },
+          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
         }}
       >
-        <Toolbar /> {/* Espaçamento para o AppBar */}
+        {drawer}
+      </Drawer>
+      
+      {/* Sidebar - Versão desktop */}
+      <Drawer
+        variant="permanent"
+        sx={{
+          display: { xs: 'none', md: 'block' },
+          '& .MuiDrawer-paper': { 
+            boxSizing: 'border-box', 
+            width: drawerWidth,
+            height: '100vh',
+            border: 'none',
+            backgroundColor: 'transparent'
+          },
+        }}
+        open
+      >
+        {drawer}
+      </Drawer>
+      
+      {/* Área de conteúdo principal */}
+      <Box component="main" sx={mainContentStyle}>
         <Outlet /> {/* Renderiza as rotas filhas */}
       </Box>
     </Box>

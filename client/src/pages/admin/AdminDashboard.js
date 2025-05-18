@@ -36,27 +36,39 @@ const AdminDashboard = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        // Normalmente faríamos uma chamada à API aqui
-        // const response = await axios.get('/api/admin/stats');
-        // setStats(response.data);
         
-        // Para fins de demonstração, usamos dados simulados
-        setTimeout(() => {
-          setStats({
-            totalUsers: 157,
-            pendingUsers: 12,
-            totalContent: 45,
-            totalPraticas: 23
-          });
-          
-          setRecentActivities([
-            { id: 1, type: 'user', action: 'Nova conta criada', user: 'Maria Silva', date: '15 maio, 2025' },
-            { id: 2, type: 'content', action: 'Nova prática adicionada', user: 'Admin', date: '14 maio, 2025' },
-            { id: 3, type: 'luzia', action: 'Base de conhecimento atualizada', user: 'Admin', date: '13 maio, 2025' }
-          ]);
-          
+        // Obter o token de autenticação do localStorage
+        const token = localStorage.getItem('token');
+        
+        if (!token) {
+          console.error('Token de autenticação não encontrado');
           setLoading(false);
-        }, 1000);
+          return;
+        }
+        
+        // Configurar headers com token de autenticação
+        const config = {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        };
+        
+        // Fazer chamadas paralelas para melhor performance
+        const [statsResponse, activitiesResponse] = await Promise.all([
+          axios.get('/api/admin/stats', config),
+          axios.get('/api/admin/recent-activities', config)
+        ]);
+        
+        // Atualizar os estados com os dados reais
+        if (statsResponse.data && statsResponse.data.data) {
+          setStats(statsResponse.data.data);
+        }
+        
+        if (activitiesResponse.data && activitiesResponse.data.data) {
+          setRecentActivities(activitiesResponse.data.data);
+        }
+        
+        setLoading(false);
       } catch (error) {
         console.error('Erro ao buscar estatísticas:', error);
         setLoading(false);
@@ -67,7 +79,7 @@ const AdminDashboard = () => {
   }, []);
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box>
       <Typography variant="h4" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }}>
         Painel Administrativo
       </Typography>

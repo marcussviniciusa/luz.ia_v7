@@ -1,7 +1,12 @@
 const User = require('../models/User');
+const Conversation = require('../models/Conversation');
+const DiarioEntry = require('../models/DiarioEntry');
+const Manifestacao = require('../models/Manifestacao');
+const RegistroPratica = require('../models/RegistroPratica');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 const LuzIA = require('../services/ia/luz-ia');
+const mongoose = require('mongoose');
 
 // @desc    Obter todos os usuários
 // @route   GET /api/admin/users
@@ -140,34 +145,190 @@ exports.deleteUser = asyncHandler(async (req, res, next) => {
 // @route   GET /api/admin/stats
 // @access  Private/Admin
 exports.getStats = asyncHandler(async (req, res, next) => {
-  // Contar usuários por status
-  const userStats = await User.aggregate([
-    {
-      $group: {
-        _id: '$status',
-        count: { $sum: 1 }
-      }
-    }
-  ]);
-
-  // Formatar os dados para o frontend
-  const formattedUserStats = {};
-  userStats.forEach(stat => {
-    formattedUserStats[stat._id] = stat.count;
-  });
-
-  // Número total de usuários
-  const totalUsers = await User.countDocuments();
-
-  // Retornar estatísticas
-  res.status(200).json({
-    success: true,
-    data: {
-      userStats: formattedUserStats,
+  try {
+    // Executar todas as consultas em paralelo para melhor performance
+    const [
+      userStats,
       totalUsers,
-      // Outras estatísticas podem ser adicionadas aqui
-    }
-  });
+      totalContent,
+      pendingUsers,
+      totalManifestacoes,
+      totalPraticas,
+      luzIAInteractions,
+      totalDiarioEntries
+    ] = await Promise.all([
+      // Contar usuários por status
+      User.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        }
+      ]),
+      // Número total de usuários
+      User.countDocuments(),
+      // Total de conteúdos (aqui estamos considerando como exemplos de conteúdo)
+      Manifestacao.countDocuments({ tipo: 'conteudo' }),
+      // Usuários pendentes
+      User.countDocuments({ status: 'pendente' }),
+      // Total de manifestações
+      Manifestacao.countDocuments(),
+      // Total de práticas concluídas
+      RegistroPratica.countDocuments({ tipoEvento: 'conclusao' }),
+      // Interações com LUZ IA
+      Conversation.aggregate([
+        {
+          $project: {
+            messageCount: { $size: '$messages' }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$messageCount' }
+          }
+        }
+      ]),
+      // Total de entradas no diário
+      DiarioEntry.countDocuments()
+    ]);
+    
+    // Formatar os dados de usuários por status
+    const formattedUserStats = {};
+    userStats.forEach(stat => {
+      formattedUserStats[stat._id] = stat.count;
+    });
+    
+    // Retornar estatísticas
+    res.status(200).json({
+      success: true,
+      data: {
+        totalUsers,
+        pendingUsers,
+        totalContent,
+        totalPraticas,
+        totalManifestacoes,
+        totalDiarioEntries,
+        luzIAInteractions: luzIAInteractions.length > 0 ? luzIAInteractions[0].total : 0,
+        userStats: formattedUserStats
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas de admin:', error);
+    return next(new ErrorResponse('Erro ao buscar estatísticas', 500));
+  }
+});
+
+// @desc    Obter atividades recentes no sistema
+// @route   GET /api/admin/recent-activities
+// @access  Private/Admin
+exports.getRecentActivities = asyncHandler(async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    
+    // Buscar dados em paralelo
+    const [
+      recentUsers,
+      recentPraticas,
+      recentDiario,
+      recentLuzIA,
+      recentManifestacoes
+    ] = await Promise.all([
+      // Novos usuários registrados
+      User.find()
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .select('nome email status createdAt'),
+        
+      // Práticas concluídas recentemente
+      RegistroPratica.find({ tipoEvento: 'conclusao' })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate('user', 'nome')
+        .populate('pratica', 'titulo categoria')
+        .select('createdAt user pratica duracao'),
+        
+      // Novos registros de diário
+      DiarioEntry.find()
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate('user', 'nome')
+        .select('createdAt user'),
+        
+      // Novas conversas com LUZ IA
+      Conversation.find()
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .populate('user', 'nome')
+        .select('title createdAt updatedAt user'),
+        
+      // Novas manifestações
+      Manifestacao.find()
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate('user', 'nome')
+        .select('nome tipo createdAt user')
+    ]);
+    
+    // Formatar todas as atividades em um formato consistente
+    const allActivities = [
+      ...recentUsers.map(user => ({
+        id: user._id,
+        type: 'user',
+        action: `Nova conta ${user.status === 'pendente' ? 'pendente' : 'criada'}`,
+        user: user.nome,
+        date: user.createdAt
+      })),
+      
+      ...recentPraticas.map(reg => ({
+        id: reg._id,
+        type: 'content',
+        action: `Prática concluída: ${reg.pratica.titulo}`,
+        user: reg.user ? reg.user.nome : 'Usuário desconhecido',
+        date: reg.createdAt
+      })),
+      
+      ...recentDiario.map(entry => ({
+        id: entry._id,
+        type: 'diario',
+        action: 'Novo registro no Diário',
+        user: entry.user ? entry.user.nome : 'Usuário desconhecido',
+        date: entry.createdAt
+      })),
+      
+      ...recentLuzIA.map(conv => ({
+        id: conv._id,
+        type: 'luzia',
+        action: `Conversa com LUZ IA: ${conv.title}`,
+        user: conv.user ? conv.user.nome : 'Usuário desconhecido',
+        date: conv.updatedAt
+      })),
+      
+      ...recentManifestacoes.map(item => ({
+        id: item._id,
+        type: 'manifestacao',
+        action: `Nova ferramenta de manifestação: ${item.nome}`,
+        user: item.user ? item.user.nome : 'Usuário desconhecido',
+        date: item.createdAt
+      }))
+    ];
+    
+    // Ordenar por data (mais recente primeiro)
+    allActivities.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    // Limitar ao número solicitado
+    const limitedActivities = allActivities.slice(0, limit);
+    
+    res.status(200).json({
+      success: true,
+      count: limitedActivities.length,
+      data: limitedActivities
+    });
+  } catch (error) {
+    console.error('Erro ao buscar atividades recentes:', error);
+    return next(new ErrorResponse('Erro ao buscar atividades recentes', 500));
+  }
 });
 
 // @desc    Atualizar base de conhecimento da LUZ IA

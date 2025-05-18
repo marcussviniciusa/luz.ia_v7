@@ -9,6 +9,7 @@ const {
   deactivateUser,
   deleteUser,
   getStats,
+  getRecentActivities,
   updateLuzIAKnowledge,
   updateLuzIAPrompt,
   getLuzIAPrompts
@@ -39,6 +40,7 @@ router.put('/users/:id/deactivate', deactivateUser);
 
 // Rotas para estatísticas
 router.get('/stats', getStats);
+router.get('/recent-activities', getRecentActivities);
 
 // Rotas para gerenciamento da LUZ IA
 router.put('/luz-ia/knowledge', updateLuzIAKnowledge);
