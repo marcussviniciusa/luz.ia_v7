@@ -29,11 +29,11 @@ const PraticaSchema = new mongoose.Schema({
   },
   audioPath: {
     type: String,
-    required: [true, 'Por favor, adicione um arquivo de áudio']
+    default: ''
   },
   duracao: {
     type: Number,  // Duração em segundos
-    required: [true, 'Por favor, especifique a duração']
+    default: 0
   },
   imagemCapa: {
     type: String,

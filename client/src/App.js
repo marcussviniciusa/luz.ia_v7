@@ -89,7 +89,8 @@ function App() {
               <Route element={<AdminLayout />}>
                 <Route path="/admin" element={<ProtectedRoute element={<AdminDashboard />} requiredRole="admin" />} />
                 <Route path="/admin/users" element={<ProtectedRoute element={<UserManagement />} requiredRole="admin" />} />
-                <Route path="/admin/content" element={<ProtectedRoute element={<ContentManagement />} requiredRole="admin" />} />
+                {/* Rota temporariamente desativada para o gerenciamento de conteúdo */}
+                {/* <Route path="/admin/content" element={<ProtectedRoute element={<ContentManagement />} requiredRole="admin" />} /> */}
                 <Route path="/admin/luz-ia" element={<ProtectedRoute element={<LuzIAManagement />} requiredRole="admin" />} />
                 <Route path="/admin/praticas" element={<ProtectedRoute element={<PraticasManagement />} requiredRole="admin" />} />
               </Route>

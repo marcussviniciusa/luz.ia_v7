@@ -228,6 +228,21 @@ function PraticasGuiadas() {
   
   // Função para iniciar uma prática
   const iniciarPratica = (pratica) => {
+    // Se for um conteúdo do tipo Content (não uma prática tradicional)
+    if (pratica.tipoConteudo === 'content') {
+      // Verificar se tem URL de conteúdo
+      if (pratica.audioPath || pratica.contentUrl) {
+        // Redirecionar para a URL do conteúdo (vídeo, artigo, etc)
+        const contentUrl = pratica.audioPath || pratica.contentUrl;
+        window.open(contentUrl, '_blank');
+      } else {
+        // Se não tiver URL, mostrar mensagem
+        showError('Este conteúdo não possui um link associado.');
+      }
+      return;
+    }
+    
+    // Para práticas tradicionais com áudio
     setSelectedPratica(pratica);
     
     // Reiniciar estado do player
@@ -453,9 +468,19 @@ function PraticasGuiadas() {
                   <PraticaCard>
                     <CardMedia
                       component="img"
-                      height="180"
-                      image={pratica.imagemUrl || '/static/images/pratica-default.jpg'}
+                      height="160"
+                      image={
+                        pratica.tipoConteudo === 'content'
+                          ? pratica.imagemCapa // Conteúdos já têm a URL completa
+                          : (pratica.imagemCapa ? `/api/proxy/minio/${pratica.imagemCapa}` : '/static/images/pratica-default.jpg')
+                      }
                       alt={pratica.titulo}
+                      sx={{ objectFit: 'cover' }}
+                      onError={(e) => {
+                        // Se a imagem não carregar, usar imagem de fallback
+                        console.log('Erro ao carregar imagem:', e.target.src);
+                        e.target.src = '/static/images/pratica-default.jpg';
+                      }}
                     />
                     
                     <CardContent sx={{ flexGrow: 1 }}>

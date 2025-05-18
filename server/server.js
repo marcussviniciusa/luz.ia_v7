@@ -1,9 +1,16 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fileUpload = require('express-fileupload');
 const connectDB = require('./config/db');
 const path = require('path');
 const errorHandler = require('./middleware/error');
+const { minioClient, initializeBucket } = require('./config/minio');
+
+// Inicializar cliente MinIO e bucket
+initializeBucket().catch(err => {
+  console.error('Erro ao inicializar o bucket MinIO:', err);
+});
 
 // Iniciar o app Express
 const app = express();
@@ -14,6 +21,15 @@ connectDB();
 // Middleware básico
 app.use(express.json());
 app.use(cors());
+
+// Middleware para upload de arquivos
+app.use(fileUpload({
+  createParentPath: true,
+  limits: { fileSize: 50 * 1024 * 1024 }, // limite de 50MB
+  debug: true, // habilitar logs de debug
+  useTempFiles: true,
+  tempFileDir: '/tmp/'
+}));
 
 // Servir arquivos estáticos e imagens - estas rotas não exigem autenticação
 // Importante: estas rotas vêm ANTES das rotas de API protegidas
@@ -35,6 +51,8 @@ app.use('/api/praticas', require('./routes/praticas'));
 app.use('/api/perfil', require('./routes/perfil'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/upload', require('./routes/upload'));
+app.use('/api/contents', require('./routes/content')); // Nova rota de gerenciamento de conteúdo
+app.use('/api/proxy', require('./routes/proxy')); // Rota de proxy para imagens
 
 // Middleware para tratamento de erros
 app.use(errorHandler);

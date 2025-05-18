@@ -122,9 +122,10 @@ function AdminLayout() {
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/admin' },
     { text: 'Usuários', icon: <PeopleIcon />, path: '/admin/users' },
-    { text: 'Conteúdo', icon: <ContentIcon />, path: '/admin/content' },
+    // Item temporariamente desativado
+    // { text: 'Conteúdo', icon: <ContentIcon />, path: '/admin/content' },
     { text: 'LUZ IA', icon: <MemoryIcon />, path: '/admin/luz-ia' },
-    { text: 'Práticas', icon: <SpaIcon />, path: '/admin/praticas' },
+    { text: 'Práticas Guiadas', icon: <SpaIcon />, path: '/admin/praticas' },
     { text: 'Estatísticas', icon: <BarChartIcon />, path: '/admin/stats' }
   ];
   

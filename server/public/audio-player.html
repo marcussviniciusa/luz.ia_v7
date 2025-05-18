@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reprodutor de Áudio - Mente Merecedora</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a2138;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #2a3142;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            max-width: 500px;
+        }
+        h1 {
+            color: #f9d56e;
+            margin-bottom: 30px;
+        }
+        p {
+            color: #a9b7d0;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+        .player-container {
+            margin: 20px 0;
+        }
+        button {
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #388e3c;
+        }
+        button:disabled {
+            background-color: #9e9e9e;
+            cursor: not-allowed;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #f9d56e;
+            margin-bottom: 20px;
+        }
+        .audio-duration {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #a9b7d0;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #6c7a94;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">MENTE MERECEDORA</div>
+        <h1>Reprodutor de Áudio de Meditação</h1>
+        <p>Este é um reprodutor para prática guiada de meditação. Clique no botão abaixo para iniciar a reprodução.</p>
+        
+        <div class="player-container">
+            <button id="playButton">Iniciar Meditação</button>
+            <div class="audio-duration">Duração: <span id="duration">5:00</span></div>
+        </div>
+
+        <p id="status">Aguardando início da prática guiada.</p>
+
+        <div class="footer">
+            &copy; 2025 Mente Merecedora - Todos os direitos reservados.
+        </div>
+    </div>
+
+    <script>
+        // Variáveis de controle do áudio
+        let audioContext;
+        let oscillator;
+        let gainNode;
+        let isPlaying = false;
+        let startTime;
+        let timerInterval;
+
+        // Elemento de botão
+        const playButton = document.getElementById('playButton');
+        const statusText = document.getElementById('status');
+        const durationElement = document.getElementById('duration');
+
+        // Duração da meditação em segundos
+        const meditationDuration = 300; // 5 minutos
+        
+        // Função para formatar o tempo em formato MM:SS
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.floor(seconds % 60);
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+
+        // Atualiza o elemento de duração
+        durationElement.textContent = formatTime(meditationDuration);
+
+        // Função para iniciar ou parar o áudio
+        playButton.addEventListener('click', function() {
+            if (!isPlaying) {
+                startMeditation();
+            } else {
+                stopMeditation();
+            }
+        });
+
+        function startMeditation() {
+            // Inicializa o contexto de áudio
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Cria um oscilador para gerar o tom
+            oscillator = audioContext.createOscillator();
+            gainNode = audioContext.createGain();
+            
+            // Configura o oscilador para produzir um tom relaxante
+            oscillator.type = 'sine'; // tipo de onda
+            oscillator.frequency.setValueAtTime(432, audioContext.currentTime); // frequência em Hz
+            
+            // Configura o volume
+            gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+            
+            // Conecta os nós
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            // Inicia o oscilador
+            oscillator.start();
+            
+            // Atualiza estado e interface
+            isPlaying = true;
+            playButton.textContent = 'Pausar Meditação';
+            statusText.textContent = 'Meditação em andamento...';
+            
+            // Inicia o temporizador
+            startTime = Date.now();
+            updateTimer();
+            timerInterval = setInterval(updateTimer, 1000);
+            
+            // Programa o encerramento da meditação
+            setTimeout(stopMeditation, meditationDuration * 1000);
+        }
+
+        function stopMeditation() {
+            if (oscillator) {
+                oscillator.stop();
+                oscillator.disconnect();
+                gainNode.disconnect();
+                clearInterval(timerInterval);
+            }
+            
+            isPlaying = false;
+            playButton.textContent = 'Iniciar Meditação';
+            statusText.textContent = 'Meditação finalizada.';
+            durationElement.textContent = formatTime(meditationDuration);
+        }
+
+        function updateTimer() {
+            const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            const remainingSeconds = Math.max(0, meditationDuration - elapsedSeconds);
+            
+            durationElement.textContent = formatTime(remainingSeconds);
+            
+            if (remainingSeconds <= 0) {
+                stopMeditation();
+            }
+        }
+    </script>
+</body>
+</html>

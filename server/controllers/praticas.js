@@ -1,45 +1,130 @@
 const Pratica = require('../models/Pratica');
 const RegistroPratica = require('../models/RegistroPratica');
+const Content = require('../models/Content');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 const { minioClient } = require('../config/minio');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const mongoose = require('mongoose');
 
 // @desc    Obter todas as práticas
 // @route   GET /api/praticas
 // @access  Private
 exports.getPraticas = asyncHandler(async (req, res, next) => {
-  // Opções de filtro
-  const { categoria, destaque } = req.query;
-  const filter = {};
+  // Opções de filtro para práticas tradicionais
+  const { categoria, destaque, page = 1, limit = 10, search } = req.query;
+  const praticasFilter = {};
   
-  // Filtrar por categoria, se fornecido
-  if (categoria) {
-    filter.categoria = categoria;
+  // Filtrar por categoria para práticas tradicionais, se fornecido
+  if (categoria && categoria !== 'todas') {
+    praticasFilter.categoria = categoria;
   }
   
   // Filtrar práticas em destaque, se solicitado
   if (destaque === 'true') {
-    filter.destaque = true;
+    praticasFilter.destaque = true;
   }
   
-  // Filtrar apenas práticas ativas por padrão
-  filter.ativa = true;
+  // Para usuários admin, mostrar todas as práticas, independente do status
+  if (req.user && req.user.role === 'admin') {
+    // Não aplicar filtro de ativa para administradores
+    console.log('Usuário admin acessando práticas, mostrando todas');
+  } else {
+    // Filtrar apenas práticas ativas para usuários comuns
+    praticasFilter.ativa = true;
+  }
   
   // Se for admin e quiser ver todas (incluindo inativas)
   if (req.user.role === 'admin' && req.query.all === 'true') {
-    delete filter.ativa;
+    delete praticasFilter.ativa;
   }
   
-  // Buscar práticas
-  const praticas = await Pratica.find(filter).sort({ ordem: 1, createdAt: -1 });
+  // Parâmetros para paginação
+  const limitNum = parseInt(limit);
+  const skip = (parseInt(page) - 1) * limitNum;
+  
+  // Buscar práticas tradicionais
+  const praticas = await Pratica.find(praticasFilter)
+    .sort({ ordem: 1, createdAt: -1 })
+    .skip(skip)
+    .limit(limitNum);
+  
+  // Contar total de práticas tradicionais
+  const totalPraticas = await Pratica.countDocuments(praticasFilter);
+  
+  // Filtrar para conteúdos do tipo 'praticas' - usando um filtro mais flexível
+  // para lidar com possíveis variações de capitalização ou pluralização
+  const contentsFilter = {
+    $or: [
+      { category: 'praticas' },
+      { category: 'Praticas' },
+      { category: 'práticas' },
+      { category: 'Práticas' },
+      { category: 'pratica' },
+      { category: 'Pratica' },
+      { category: 'prática' },
+      { category: 'Prática' }
+    ]
+  };
+  
+  // Apenas publicados
+  if (req.query.all !== 'true' || req.user.role !== 'admin') {
+    contentsFilter.status = 'published';
+  }
+  
+  console.log('Buscando conteúdos com filtro ampliado:', JSON.stringify(contentsFilter));
+  
+  // Busca por texto, se fornecido
+  if (search) {
+    contentsFilter.$or = [
+      { title: { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  // Buscar conteúdos do tipo 'praticas'
+  const contents = await Content.find(contentsFilter)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limitNum);
+  
+  console.log('Conteúdos encontrados:', contents.length);
+  if (contents.length > 0) {
+    console.log('Amostra do primeiro conteúdo:', JSON.stringify(contents[0], null, 2));
+  } else {
+    console.log('Nenhum conteúdo encontrado com o filtro especificado.');
+  }
+  
+  // Contar total de conteúdos do tipo 'praticas'
+  const totalContents = await Content.countDocuments(contentsFilter);
+  console.log('Total de conteúdos:', totalContents);
+  
+  // Mapear conteúdos para o formato esperado pelo frontend
+  const mappedContents = contents.map(content => ({
+    _id: content._id,
+    titulo: content.title,
+    descricao: content.description,
+    categoria: content.type === 'video' ? 'video' : 'meditacao', // Mapeamento básico de categoria
+    imagemCapa: content.imageUrl, // URL da imagem já está no formato correto
+    tipoConteudo: 'content', // Identificador para diferenciar de práticas tradicionais
+    audioPath: content.contentUrl || '', // URL do conteúdo (vídeo/áudio) se existir
+    duracao: 0, // Não temos essa informação nos conteúdos
+    createdAt: content.createdAt
+  }));
+  
+  // Combinar resultados
+  const combinedResults = [...praticas, ...mappedContents];
+  
+  // Ordenar por data de criação (mais recentes primeiro)
+  combinedResults.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   
   res.status(200).json({
     success: true,
-    count: praticas.length,
-    data: praticas
+    count: combinedResults.length,
+    total: totalPraticas + totalContents,
+    data: combinedResults
   });
 });
 
@@ -72,22 +157,253 @@ exports.getPratica = asyncHandler(async (req, res, next) => {
 // @route   POST /api/praticas
 // @access  Private/Admin
 exports.createPratica = asyncHandler(async (req, res, next) => {
-  // Validar se tem todos os campos necessários
-  if (!req.body.titulo || !req.body.descricao || !req.body.categoria || !req.body.duracao) {
+  try {
+    console.log('Criando nova prática guiada:', req.body);
+    
+    // Validar se tem todos os campos necessários
+    if (!req.body.titulo || !req.body.descricao) {
+      return next(
+        new ErrorResponse('Por favor, preencha o título e a descrição', 400)
+      );
+    }
+    
+    // Garantir que categoria tenha um valor válido
+    if (!req.body.categoria) {
+      req.body.categoria = 'outro';
+    }
+    
+    // Se não houver duração, definir como zero
+    if (!req.body.duracao) {
+      req.body.duracao = 0;
+    }
+    
+    // Dados básicos da prática
+    const pratica = await Pratica.create({
+      titulo: req.body.titulo,
+      descricao: req.body.descricao,
+      categoria: req.body.categoria || 'meditacao',
+      audioPath: '', // Será definido após o upload
+      duracao: req.body.duracao || 0,
+      imagemCapa: '', // Será definido após o upload
+      destaque: req.body.destaque || false,
+      ordem: req.body.ordem || 0,
+      ativa: req.body.ativa !== undefined ? req.body.ativa : true
+    });
+    
+    console.log('Prática criada com sucesso:', pratica);
+      
+    res.status(201).json({
+      success: true,
+      data: pratica
+    });
+  } catch (error) {
+    console.error('Erro ao criar prática:', error.message);
+    return next(new ErrorResponse(`Erro ao criar prática: ${error.message}`, 400));
+  }
+});
+
+// @desc    Processar uploads de arquivos para uma prática (apenas admin)
+// @route   PUT /api/praticas/:id/uploads
+// @access  Private/Admin
+exports.uploadPraticaFiles = asyncHandler(async (req, res, next) => {
+  console.log('========== INICIANDO UPLOAD DE ARQUIVOS ==========');
+  console.log('Processando upload de arquivos para prática:', req.params.id);
+  console.log('Arquivos recebidos:', req.files ? Object.keys(req.files) : 'nenhum');
+  if (req.files) {
+    if (req.files.audioFile) {
+      console.log('Detalhes do arquivo de áudio:', {
+        nome: req.files.audioFile.name,
+        tipo: req.files.audioFile.mimetype,
+        tamanho: req.files.audioFile.size
+      });
+    }
+    if (req.files.imagemFile) {
+      console.log('Detalhes do arquivo de imagem:', {
+        nome: req.files.imagemFile.name,
+        tipo: req.files.imagemFile.mimetype,
+        tamanho: req.files.imagemFile.size
+      });
+    }
+  }
+  
+  const pratica = await Pratica.findById(req.params.id);
+  
+  if (!pratica) {
     return next(
-      new ErrorResponse('Por favor, preencha todos os campos obrigatórios', 400)
+      new ErrorResponse(`Prática não encontrada com id ${req.params.id}`, 404)
     );
   }
   
-  // O audioPath será adicionado posteriormente no upload do áudio
+  // Configurar bucket do MinIO
+  const bucketName = process.env.MINIO_BUCKET_NAME || 'luz-ia';
   
-  // Criar prática
-  const pratica = await Pratica.create(req.body);
+  // Verificar se o bucket existe
+  try {
+    const bucketExists = await minioClient.bucketExists(bucketName);
+    console.log(`Bucket ${bucketName} existe? ${bucketExists}`);
+    
+    if (!bucketExists) {
+      console.log(`Criando bucket ${bucketName}...`);
+      await minioClient.makeBucket(bucketName);
+      console.log(`Bucket ${bucketName} criado com sucesso`);
+    }
+  } catch (error) {
+    console.error(`Erro ao verificar/criar bucket ${bucketName}:`, error);
+    return next(new ErrorResponse(`Erro ao configurar armazenamento: ${error.message}`, 500));
+  }
   
-  res.status(201).json({
-    success: true,
-    data: pratica
-  });
+  // Processar upload de áudio
+  if (req.files && req.files.audioFile) {
+    const audioFile = req.files.audioFile;
+    const audioFileName = `praticas/${Date.now()}-${uuidv4()}.mp3`;
+    
+    console.log('=========== UPLOAD DE ÁUDIO ===========');
+    console.log('Salvando arquivo de áudio:', audioFileName);
+    console.log('Informações do arquivo:', {
+      nome: audioFile.name,
+      tamanho: audioFile.size,
+      tipo: audioFile.mimetype,
+      md5: audioFile.md5
+    });
+    console.log('Conteúdo do req.files:', Object.keys(req.files));
+    console.log('Prática antes da atualização - ID:', pratica._id);
+    console.log('Prática antes da atualização - AudioPath:', pratica.audioPath || 'Vazio');
+    console.log('======================================');
+    
+    // Verificar se temos um arquivo temporário ou dados do arquivo
+    if (!audioFile.tempFilePath && (!audioFile.data || audioFile.data.length === 0)) {
+      console.error('ERRO: Dados do arquivo estão vazios e não há arquivo temporário!');
+      return next(new ErrorResponse('Os dados do arquivo de áudio estão vazios', 400));
+    }
+    
+    console.log('Arquivo temporário:', audioFile.tempFilePath || 'Não disponível');
+    console.log('Tamanho do arquivo:', audioFile.size);
+    
+    // Definir metadados para o arquivo
+    const metaData = {
+      'Content-Type': audioFile.mimetype,
+      'X-Amz-Meta-Original-Filename': audioFile.name
+    };
+    
+    try {
+      // Primeiro fazemos o upload do arquivo para o MinIO
+      console.log(`Iniciando upload para MinIO bucket=${bucketName}, file=${audioFileName}`);
+      
+      // Verificar se estamos trabalhando com arquivo temporário ou dados em memória
+      if (audioFile.tempFilePath) {
+        console.log('Usando arquivo temporário para upload:', audioFile.tempFilePath);
+        const fs = require('fs');
+        // Ler o arquivo temporário e fazer upload
+        const fileStream = fs.createReadStream(audioFile.tempFilePath);
+        await minioClient.putObject(bucketName, audioFileName, fileStream, audioFile.size, metaData);
+      } else {
+        console.log('Usando dados em memória para upload, tamanho:', audioFile.data ? audioFile.data.length : 0);
+        await minioClient.putObject(bucketName, audioFileName, audioFile.data, audioFile.size, metaData);
+      }
+      
+      console.log('Upload para MinIO concluído com sucesso');
+      
+      // Depois de confirmar o upload bem-sucedido, atualizamos o caminho na prática
+      console.log('Antes de atualizar o audioPath:', pratica.audioPath);
+      
+      // Forçar a atualização do caminho do áudio
+      pratica.audioPath = audioFileName;
+      
+      // Registrar a mudança para diagnóstico
+      console.log('Depois de atualizar o audioPath:', pratica.audioPath);
+      console.log('audioFileName:', audioFileName);
+      
+      // Verificar se o arquivo existe após o upload
+      try {
+        const stat = await minioClient.statObject(bucketName, audioFileName);
+        console.log('Arquivo confirmado no MinIO:', {
+          tamanho: stat.size,
+          última_modificação: stat.lastModified
+        });
+      } catch (statError) {
+        console.warn('Aviso: Falha ao verificar arquivo após upload:', statError.message);
+      }
+      
+      console.log('Arquivo de áudio salvo com sucesso no bucket', bucketName);
+    } catch (error) {
+      console.error('Erro ao fazer upload do áudio para MinIO:', error);
+      return next(new ErrorResponse(`Erro ao fazer upload do áudio: ${error.message}`, 500));
+    }
+  } else {
+    console.log('Sem arquivos de áudio para upload');
+  }
+  
+  // Processar upload de imagem
+  if (req.files && req.files.imagemFile) {
+    const imagemFile = req.files.imagemFile;
+    const imagemFileName = `praticas/${Date.now()}-${uuidv4()}.jpg`;
+    
+    console.log('Salvando arquivo de imagem:', imagemFileName);
+    
+    try {
+      // Definir metadados para o arquivo
+      const metaData = {
+        'Content-Type': imagemFile.mimetype,
+        'X-Amz-Meta-Original-Filename': imagemFile.name
+      };
+      
+      // Upload do arquivo para o MinIO
+      console.log(`Iniciando upload de imagem para MinIO bucket=${bucketName}, file=${imagemFileName}`);
+      
+      // Verificar se estamos trabalhando com arquivo temporário ou dados em memória
+      if (imagemFile.tempFilePath) {
+        console.log('Usando arquivo temporário para upload de imagem:', imagemFile.tempFilePath);
+        const fs = require('fs');
+        // Ler o arquivo temporário e fazer upload
+        const fileStream = fs.createReadStream(imagemFile.tempFilePath);
+        await minioClient.putObject(bucketName, imagemFileName, fileStream, imagemFile.size, metaData);
+      } else {
+        console.log('Usando dados em memória para upload de imagem, tamanho:', imagemFile.data ? imagemFile.data.length : 0);
+        await minioClient.putObject(bucketName, imagemFileName, imagemFile.data, imagemFile.size, metaData);
+      }
+      
+      pratica.imagemCapa = imagemFileName;
+      console.log('Arquivo de imagem salvo com sucesso');
+    } catch (error) {
+      console.error('Erro ao fazer upload da imagem para MinIO:', error);
+      return next(new ErrorResponse(`Erro ao fazer upload da imagem: ${error.message}`, 500));
+    }
+  }
+  
+  // Salvar prática com os novos caminhos de arquivo
+  try {
+    await pratica.save();
+    
+    console.log('Prática atualizada com sucesso:', {
+      id: pratica._id,
+      audioPath: pratica.audioPath,
+      imagemCapa: pratica.imagemCapa
+    });
+    
+    // Verificar se o MinIO consegue acessar o arquivo (opcional, apenas para garantir)
+    if (pratica.audioPath) {
+      try {
+        const stat = await minioClient.statObject(bucketName, pratica.audioPath);
+        console.log('Verificação do arquivo no MinIO:', {
+          existe: true,
+          tamanho: stat.size,
+          lastModified: stat.lastModified
+        });
+      } catch (err) {
+        console.warn('Aviso: Não foi possível verificar o arquivo no MinIO:', err.message);
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: pratica
+    });
+  } catch (saveError) {
+    console.error('Erro ao salvar prática:', saveError);
+    return next(new ErrorResponse(`Erro ao salvar informações da prática: ${saveError.message}`, 500));
+  }
+  
+  console.log('========== UPLOAD CONCLUÍDO COM SUCESSO ==========');
 });
 
 // @desc    Atualizar prática (apenas admin)

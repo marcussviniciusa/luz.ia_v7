@@ -8,6 +8,7 @@ const {
   togglePratica,
   uploadAudio,
   uploadImagem,
+  uploadPraticaFiles,
   getAudioUrl,
   concluirPratica,
   getHistorico,
@@ -52,6 +53,9 @@ router.route('/:id')
 
 // Rota para ativar/desativar prática
 router.put('/:id/toggle', authorize('admin'), togglePratica);
+
+// Rota para upload de arquivos (áudio e imagem)
+router.put('/:id/uploads', authorize('admin'), uploadPraticaFiles);
 
 // Rota para obter URL de streaming
 router.get('/:id/audio-url', getAudioUrl);
