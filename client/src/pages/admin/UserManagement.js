@@ -23,14 +23,16 @@ import {
   Select,
   MenuItem,
   IconButton,
-  CircularProgress
+  CircularProgress,
+  InputBase
 } from '@mui/material';
 import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
-  Search as SearchIcon
+  Search as SearchIcon,
+  Add as AddIcon
 } from '@mui/icons-material';
 import { SnackbarContext } from '../../contexts/SnackbarContext';
 import axios from 'axios';
@@ -48,6 +50,7 @@ const UserManagement = () => {
   // Diálogos
   const [editDialog, setEditDialog] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(false);
+  const [createDialog, setCreateDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [editedUser, setEditedUser] = useState({
     name: '',
@@ -55,6 +58,18 @@ const UserManagement = () => {
     role: '',
     status: ''
   });
+  
+  // Estado para novo usuário
+  const [newUser, setNewUser] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'user',
+    status: 'pendente'
+  });
+  
+  // Estado para validação de email
+  const [emailExists, setEmailExists] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -63,54 +78,59 @@ const UserManagement = () => {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // const response = await axios.get(\`/api/admin/users?page=$\{page}&limit=$\{rowsPerPage}&search=$\{searchTerm}&status=$\{filterStatus}\`);
-      // setUsers(response.data.users);
-      // setTotalUsers(response.data.total);
       
-      // Dados simulados para demonstração
-      setTimeout(() => {
-        const mockUsers = [
-          { id: 1, name: 'Maria Silva', email: 'maria@exemplo.com', role: 'user', status: 'active', createdAt: '2025-01-15' },
-          { id: 2, name: 'João Santos', email: 'joao@exemplo.com', role: 'user', status: 'pending', createdAt: '2025-04-22' },
-          { id: 3, name: 'Ana Oliveira', email: 'ana@exemplo.com', role: 'admin', status: 'active', createdAt: '2024-11-05' },
-          { id: 4, name: 'Carlos Ferreira', email: 'carlos@exemplo.com', role: 'user', status: 'suspended', createdAt: '2025-03-18' },
-          { id: 5, name: 'Patricia Lima', email: 'patricia@exemplo.com', role: 'user', status: 'active', createdAt: '2025-02-27' },
-          { id: 6, name: 'Marcos Alves', email: 'marcos@exemplo.com', role: 'user', status: 'active', createdAt: '2025-01-30' },
-          { id: 7, name: 'Juliana Costa', email: 'juliana@exemplo.com', role: 'user', status: 'pending', createdAt: '2025-05-01' },
-          { id: 8, name: 'Roberto Pereira', email: 'roberto@exemplo.com', role: 'user', status: 'active', createdAt: '2025-04-10' },
-          { id: 9, name: 'Fernanda Rocha', email: 'fernanda@exemplo.com', role: 'user', status: 'active', createdAt: '2025-03-05' },
-          { id: 10, name: 'Eduardo Gomes', email: 'eduardo@exemplo.com', role: 'user', status: 'pending', createdAt: '2025-05-08' },
-          { id: 11, name: 'Luciana Melo', email: 'luciana@exemplo.com', role: 'user', status: 'active', createdAt: '2025-02-15' },
-          { id: 12, name: 'Gabriel Souza', email: 'gabriel@exemplo.com', role: 'user', status: 'suspended', createdAt: '2025-03-20' }
-        ];
-        
-        // Filtrar usuários com base nos filtros aplicados
-        let filteredUsers = [...mockUsers];
-        
-        if (searchTerm) {
-          filteredUsers = filteredUsers.filter(user => 
-            user.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-            user.email.toLowerCase().includes(searchTerm.toLowerCase())
-          );
+      // Parâmetros de consulta para a API
+      const queryParams = new URLSearchParams({
+        page: page + 1, // API começa em 1, não em 0
+        limit: rowsPerPage
+      });
+      
+      // Adicionar parâmetros de filtro quando aplicável
+      if (searchTerm) {
+        queryParams.append('search', searchTerm);
+      }
+      
+      if (filterStatus !== 'all') {
+        queryParams.append('status', filterStatus);
+      }
+      
+      // Chamada real à API
+      const response = await axios.get(`/api/admin/users?${queryParams.toString()}`);
+      
+      // Verificar se a resposta contém os dados necessários (formato de resposta do advancedResults middleware)
+      if (response.data && response.data.success) {
+        // Format advancedResults response
+        setUsers(response.data.data || []);
+        if (response.data.pagination) {
+          setTotalUsers(response.data.pagination.total);
+        } else {
+          setTotalUsers(response.data.count || 0);
         }
-        
-        if (filterStatus !== 'all') {
-          filteredUsers = filteredUsers.filter(user => user.status === filterStatus);
+      } else {
+        // Se a estrutura da resposta for diferente
+        if (response.data) {
+          // Formato alternativo - pode ser que os usuários estejam diretamente na resposta
+          if (Array.isArray(response.data)) {
+            setUsers(response.data);
+            setTotalUsers(response.data.length);
+          } else if (response.data.data && Array.isArray(response.data.data)) {
+            setUsers(response.data.data);
+            setTotalUsers(response.data.data.length);
+          } else {
+            console.warn('Resposta da API em formato inesperado:', response.data);
+            setUsers([]);
+            setTotalUsers(0);
+          }
+        } else {
+          setUsers([]);
+          setTotalUsers(0);
         }
-        
-        setTotalUsers(filteredUsers.length);
-        
-        // Aplicar paginação
-        const startIndex = page * rowsPerPage;
-        const paginatedUsers = filteredUsers.slice(startIndex, startIndex + rowsPerPage);
-        
-        setUsers(paginatedUsers);
-        setLoading(false);
-      }, 800);
+      }
     } catch (error) {
       console.error('Erro ao buscar usuários:', error);
-      showError('Erro ao carregar lista de usuários');
+      showError('Erro ao carregar lista de usuários: ' + (error.response?.data?.message || error.message));
+      setUsers([]);
+    } finally {
       setLoading(false);
     }
   };
@@ -161,26 +181,105 @@ const UserManagement = () => {
   const handleSaveEdit = async () => {
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // await axios.put(\`/api/admin/users/$\{selectedUser.id}\`, editedUser);
       
-      // Simulação para demonstração
-      setTimeout(() => {
-        const updatedUsers = users.map(user => {
-          if (user.id === selectedUser.id) {
-            return { ...user, ...editedUser };
-          }
-          return user;
-        });
-        
-        setUsers(updatedUsers);
-        showSuccess('Usuário atualizado com sucesso');
-        handleCloseEditDialog();
+      // Validar dados antes de enviar
+      if (!editedUser.name || !editedUser.email) {
+        showError('Nome e email são obrigatórios');
         setLoading(false);
-      }, 500);
+        return;
+      }
+      
+      // Enviar para a API
+      await axios.put(`/api/admin/users/${selectedUser._id}`, editedUser);
+      
+      showSuccess('Usuário atualizado com sucesso');
+      handleCloseEditDialog();
+      fetchUsers(); // Recarregar a lista após atualização
     } catch (error) {
       console.error('Erro ao atualizar usuário:', error);
-      showError('Erro ao atualizar usuário');
+      showError('Erro ao atualizar usuário: ' + (error.response?.data?.message || error.message));
+      setLoading(false);
+    }
+  };
+
+  const handleOpenCreateDialog = () => {
+    setCreateDialog(true);
+    setNewUser({
+      name: '',
+      email: '',
+      password: '',
+      role: 'user',
+      status: 'pendente'
+    });
+    setEmailExists(false);
+  };
+
+  const handleCloseCreateDialog = () => {
+    setCreateDialog(false);
+    setNewUser({
+      name: '',
+      email: '',
+      password: '',
+      role: 'user',
+      status: 'pendente'
+    });
+    setEmailExists(false);
+  };
+
+  const handleNewUserChange = (e) => {
+    const { name, value } = e.target;
+    setNewUser(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Se o campo for email, limpar a flag de validação
+    if (name === 'email') {
+      setEmailExists(false);
+    }
+  };
+
+  const checkEmailExists = async (email) => {
+    try {
+      const response = await axios.get(`/api/admin/users/check-email?email=${encodeURIComponent(email)}`);
+      return response.data.exists;
+    } catch (error) {
+      console.error('Erro ao verificar email:', error);
+      // Em caso de erro, mostrar a mensagem mas permitir prosseguir
+      showError('Erro ao verificar disponibilidade do email. Prosseguindo com o cadastro.');
+      return false;
+    }
+  };
+
+  const handleCreateUser = async () => {
+    try {
+      // Validar campos obrigatórios
+      if (!newUser.name || !newUser.email || !newUser.password) {
+        showError('Nome, email e senha são obrigatórios');
+        return;
+      }
+      
+      setLoading(true);
+      
+      // Verificar se o email já existe
+      const exists = await checkEmailExists(newUser.email);
+      if (exists) {
+        setEmailExists(true);
+        showError('Este email já está sendo utilizado por outra conta');
+        setLoading(false);
+        return;
+      }
+      
+      // Criar o usuário na API
+      await axios.post('/api/admin/users', newUser);
+      
+      showSuccess('Usuário criado com sucesso');
+      handleCloseCreateDialog();
+      fetchUsers(); // Recarregar a lista após criação
+    } catch (error) {
+      console.error('Erro ao criar usuário:', error);
+      showError('Erro ao criar usuário: ' + (error.response?.data?.message || error.message));
+    } finally {
       setLoading(false);
     }
   };
@@ -188,21 +287,16 @@ const UserManagement = () => {
   const handleDeleteUser = async () => {
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // await axios.delete(\`/api/admin/users/$\{selectedUser.id}\`);
       
-      // Simulação para demonstração
-      setTimeout(() => {
-        const updatedUsers = users.filter(user => user.id !== selectedUser.id);
-        setUsers(updatedUsers);
-        setTotalUsers(prev => prev - 1);
-        showSuccess('Usuário removido com sucesso');
-        handleCloseDeleteDialog();
-        setLoading(false);
-      }, 500);
+      // Enviar a solicitação de exclusão para a API
+      await axios.delete(`/api/admin/users/${selectedUser._id}`);
+      
+      showSuccess('Usuário excluído com sucesso');
+      handleCloseDeleteDialog();
+      fetchUsers(); // Recarregar a lista após exclusão
     } catch (error) {
-      console.error('Erro ao remover usuário:', error);
-      showError('Erro ao remover usuário');
+      console.error('Erro ao excluir usuário:', error);
+      showError('Erro ao excluir usuário: ' + (error.response?.data?.message || error.message));
       setLoading(false);
     }
   };
@@ -210,63 +304,45 @@ const UserManagement = () => {
   const approveUser = async (userId) => {
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // await axios.put(\`/api/admin/users/$\{userId}/approve\`);
       
-      // Simulação para demonstração
-      setTimeout(() => {
-        const updatedUsers = users.map(user => {
-          if (user.id === userId) {
-            return { ...user, status: 'active' };
-          }
-          return user;
-        });
-        
-        setUsers(updatedUsers);
-        showSuccess('Usuário aprovado com sucesso');
-        setLoading(false);
-      }, 500);
+      // Chamar a API para aprovar o usuário
+      await axios.put(`/api/admin/users/${userId}/approve`);
+      
+      showSuccess('Usuário aprovado com sucesso');
+      fetchUsers(); // Recarregar a lista após aprovação
     } catch (error) {
       console.error('Erro ao aprovar usuário:', error);
-      showError('Erro ao aprovar usuário');
+      showError('Erro ao aprovar usuário: ' + (error.response?.data?.message || error.message));
+    } finally {
       setLoading(false);
     }
   };
-
+  
   const rejectUser = async (userId) => {
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // await axios.put(\`/api/admin/users/$\{userId}/reject\`);
       
-      // Simulação para demonstração
-      setTimeout(() => {
-        const updatedUsers = users.map(user => {
-          if (user.id === userId) {
-            return { ...user, status: 'suspended' };
-          }
-          return user;
-        });
-        
-        setUsers(updatedUsers);
-        showSuccess('Usuário rejeitado');
-        setLoading(false);
-      }, 500);
+      // Chamar a API para rejeitar/desativar o usuário
+      await axios.put(`/api/admin/users/${userId}/deactivate`);
+      
+      showSuccess('Usuário rejeitado com sucesso');
+      fetchUsers(); // Recarregar a lista após rejeição
     } catch (error) {
       console.error('Erro ao rejeitar usuário:', error);
-      showError('Erro ao rejeitar usuário');
+      showError('Erro ao rejeitar usuário: ' + (error.response?.data?.message || error.message));
+    } finally {
       setLoading(false);
     }
   };
 
   const getStatusChip = (status) => {
     switch (status) {
-      case 'active':
-        return <Chip label="Ativo" color="success" size="small" />;
-      case 'pending':
-        return <Chip label="Pendente" color="warning" size="small" />;
-      case 'suspended':
-        return <Chip label="Suspenso" color="error" size="small" />;
+      case 'aprovada':
+        return <Chip label="Ativo" size="small" color="success" />;
+      case 'pendente':
+        return <Chip label="Pendente" size="small" color="warning" />;
+      case 'desativada':
+        return <Chip label="Desativado" size="small" color="error" />;
       default:
         return <Chip label={status} size="small" />;
     }
@@ -279,6 +355,21 @@ const UserManagement = () => {
       </Typography>
       
       <Paper sx={{ p: 2, mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h5" component="h1">
+            Gerenciamento de Usuários
+          </Typography>
+          
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={handleOpenCreateDialog}
+          >
+            Novo Usuário
+          </Button>
+        </Box>
+        
         <Box sx={{ display: 'flex', mb: 2, gap: 2 }}>
           <TextField
             placeholder="Buscar por nome ou email"
@@ -302,9 +393,9 @@ const UserManagement = () => {
               label="Status"
             >
               <MenuItem value="all">Todos</MenuItem>
-              <MenuItem value="active">Ativos</MenuItem>
-              <MenuItem value="pending">Pendentes</MenuItem>
-              <MenuItem value="suspended">Suspensos</MenuItem>
+              <MenuItem value="aprovada">Ativos</MenuItem>
+              <MenuItem value="pendente">Pendentes</MenuItem>
+              <MenuItem value="desativada">Desativados</MenuItem>
             </Select>
           </FormControl>
         </Box>
@@ -337,20 +428,20 @@ const UserManagement = () => {
               </TableRow>
             ) : (
               users.map((user) => (
-                <TableRow key={user.id} hover>
+                <TableRow key={user._id} hover>
                   <TableCell>{user.name}</TableCell>
                   <TableCell>{user.email}</TableCell>
                   <TableCell>{user.role === 'admin' ? 'Administrador' : 'Usuário'}</TableCell>
                   <TableCell>{getStatusChip(user.status)}</TableCell>
-                  <TableCell>{user.createdAt}</TableCell>
+                  <TableCell>{new Date(user.createdAt).toLocaleDateString('pt-BR')}</TableCell>
                   <TableCell align="center">
                     <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                      {user.status === 'pending' && (
+                      {user.status === 'pendente' && (
                         <>
                           <IconButton 
                             size="small" 
                             color="success" 
-                            onClick={() => approveUser(user.id)}
+                            onClick={() => approveUser(user._id)}
                             title="Aprovar"
                           >
                             <CheckCircleIcon />
@@ -358,7 +449,7 @@ const UserManagement = () => {
                           <IconButton 
                             size="small" 
                             color="error" 
-                            onClick={() => rejectUser(user.id)}
+                            onClick={() => rejectUser(user._id)}
                             title="Rejeitar"
                           >
                             <CancelIcon />
@@ -446,9 +537,9 @@ const UserManagement = () => {
               onChange={handleEditChange}
               label="Status"
             >
-              <MenuItem value="active">Ativo</MenuItem>
-              <MenuItem value="pending">Pendente</MenuItem>
-              <MenuItem value="suspended">Suspenso</MenuItem>
+              <MenuItem value="aprovada">Ativo</MenuItem>
+              <MenuItem value="pendente">Pendente</MenuItem>
+              <MenuItem value="desativada">Desativado</MenuItem>
             </Select>
           </FormControl>
         </DialogContent>
@@ -482,6 +573,85 @@ const UserManagement = () => {
             disabled={loading}
           >
             {loading ? <CircularProgress size={24} /> : 'Excluir'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Diálogo de Criação de Usuário */}
+      <Dialog open={createDialog} onClose={handleCloseCreateDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Criar Novo Usuário</DialogTitle>
+        <DialogContent>
+          <TextField
+            margin="dense"
+            label="Nome"
+            name="name"
+            fullWidth
+            variant="outlined"
+            value={newUser.name}
+            onChange={handleNewUserChange}
+            sx={{ mb: 2, mt: 2 }}
+            required
+          />
+          <TextField
+            margin="dense"
+            label="Email"
+            name="email"
+            type="email"
+            fullWidth
+            variant="outlined"
+            value={newUser.email}
+            onChange={handleNewUserChange}
+            sx={{ mb: 2 }}
+            required
+            error={emailExists}
+            helperText={emailExists ? 'Este email já está sendo utilizado' : ''}
+          />
+          <TextField
+            margin="dense"
+            label="Senha"
+            name="password"
+            type="password"
+            fullWidth
+            variant="outlined"
+            value={newUser.password}
+            onChange={handleNewUserChange}
+            sx={{ mb: 2 }}
+            required
+          />
+          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
+            <InputLabel>Função</InputLabel>
+            <Select
+              name="role"
+              value={newUser.role}
+              onChange={handleNewUserChange}
+              label="Função"
+            >
+              <MenuItem value="user">Usuário</MenuItem>
+              <MenuItem value="admin">Administrador</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl fullWidth margin="dense">
+            <InputLabel>Status</InputLabel>
+            <Select
+              name="status"
+              value={newUser.status}
+              onChange={handleNewUserChange}
+              label="Status"
+            >
+              <MenuItem value="aprovada">Ativo</MenuItem>
+              <MenuItem value="pendente">Pendente</MenuItem>
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCreateDialog} color="inherit">Cancelar</Button>
+          <Button 
+            onClick={handleCreateUser} 
+            color="primary" 
+            variant="contained"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={24} /> : 'Criar'}
           </Button>
         </DialogActions>
       </Dialog>

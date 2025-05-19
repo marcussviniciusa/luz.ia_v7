@@ -68,13 +68,15 @@ const Watermark = styled(Box)(({ theme }) => ({
   alignItems: 'center',
 }));
 
-// Componente para rolagem automática
+// Componente para rolagem automática com altura fixa
 const ScrollableMessages = styled(Box)(({ theme }) => ({
   display: 'flex',
   flexDirection: 'column',
   overflowY: 'auto',
   padding: theme.spacing(2),
-  flexGrow: 1,
+  height: 'calc(70vh - 140px)', // Altura fixa para o container
+  minHeight: '400px',            // Altura mínima para garantir visibilidade
+  maxHeight: '70vh',             // Altura máxima relativa
   marginBottom: theme.spacing(2),
   "&::-webkit-scrollbar": {
     width: '8px',
@@ -475,7 +477,7 @@ function LuzIA() {
       <Paper 
         elevation={0}
         sx={{ 
-          flexGrow: 1, 
+          height: '100%',     // Ocupa toda a altura disponível
           display: 'flex', 
           flexDirection: 'column',
           borderRadius: 0,

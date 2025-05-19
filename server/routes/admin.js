@@ -12,12 +12,15 @@ const {
   getRecentActivities,
   updateLuzIAKnowledge,
   updateLuzIAPrompt,
-  getLuzIAPrompts
+  getLuzIAPrompts,
+  checkEmailExists
 } = require('../controllers/admin');
 
 const router = express.Router();
 
 const { protect, authorize } = require('../middleware/auth');
+const advancedResults = require('../middleware/advancedResults');
+const User = require('../models/User');
 
 // Todas as rotas de admin precisam de autenticação e autorização
 router.use(protect);
@@ -25,10 +28,11 @@ router.use(authorize('admin'));
 
 // Rotas de gerenciamento de usuários
 router.route('/users')
-  .get(getUsers)
+  .get(advancedResults(User), getUsers)
   .post(createUser);
 
 router.get('/users/pending', getPendingUsers);
+router.get('/users/check-email', checkEmailExists);
 
 router.route('/users/:id')
   .get(getUser)

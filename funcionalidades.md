@@ -18,6 +18,12 @@
 ## ⚙️ Painel de Administração
 - [x] Login exclusivo para Elis e equipe
 - [x] Gerenciamento completo de usuárias
+  - [x] Criação de novos usuários com validação de email
+  - [x] Edição de perfis de usuários existentes
+  - [x] Aprovação/rejeição de usuários pendentes
+  - [x] Exclusão de usuários
+  - [x] Filtragem por status e busca por nome/email
+  - [x] Paginação de resultados
 - [x] Estatísticas e métricas de uso
 - [x] Gerenciamento de conteúdo
 
@@ -45,6 +51,9 @@
 ## 🧘‍♀️ Centro de Práticas Guiadas
 - [x] Biblioteca de meditações com temporizador
 - [x] Sistema de upload de áudios guiados
+  - [x] Upload de arquivos de áudio para MinIO
+  - [x] Reprodução de áudio com fallback para tom de meditação
+  - [x] Tratamento robusto de erros durante o processo
 - [x] Exercícios interativos da metodologia
 - [x] Calendário de práticas personalizável
 - [x] Gerenciamento administrativo das práticas
