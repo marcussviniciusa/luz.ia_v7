@@ -89,57 +89,37 @@ const LuzIAManagement = () => {
     try {
       setLoading(true);
       
-      // Na implementação real, faríamos chamadas à API específicas para cada aba
-      setTimeout(() => {
-        if (tabValue === 0) {
-          // Configurações - simular busca de configurações
-          setSettings({
-            apiKey: '•••••••••••••••••••••••',
-            model: 'gpt-4o-mini',
-            maxTokens: 2000,
-            temperature: 0.7,
-            personalityLevel: 'equilibrado'
-          });
-        } else if (tabValue === 1) {
-          // Base de conhecimento - simular busca de arquivos
-          setKnowledgeBase([
-            { id: 1, name: 'metodologia.pdf', size: '2.4 MB', type: 'pdf', uploaded: '2025-04-12', description: 'Metodologia completa da Mente Merecedora', status: 'processed' },
-            { id: 2, name: 'exercicios.docx', size: '1.1 MB', type: 'document', uploaded: '2025-04-15', description: 'Lista de exercícios práticos', status: 'processed' },
-            { id: 3, name: 'principios.txt', size: '45 KB', type: 'text', uploaded: '2025-05-01', description: 'Princípios fundamentais da manifestação', status: 'processed' },
-            { id: 4, name: 'transcricao_audio.txt', size: '312 KB', type: 'text', uploaded: '2025-05-10', description: 'Transcrição de áudio de workshop', status: 'processing' }
-          ]);
-        } else if (tabValue === 2) {
-          // Histórico de conversas - simular busca de conversas
-          setConversations([
-            { id: 1, user: 'Maria Silva', date: '2025-05-14', messages: 12, topic: 'Manifestação', preview: 'Como posso melhorar minha manifestação...' },
-            { id: 2, user: 'João Santos', date: '2025-05-13', messages: 8, topic: 'Diário Quântico', preview: 'Dicas para melhorar meu diário...' },
-            { id: 3, user: 'Ana Oliveira', date: '2025-05-12', messages: 15, topic: 'Práticas Guiadas', preview: 'Qual a melhor prática para...' },
-            { id: 4, user: 'Carlos Pereira', date: '2025-05-10', messages: 5, topic: 'Manifestação', preview: 'Como criar um quadro de...' }
-          ]);
-        } else if (tabValue === 3) {
-          // Métricas - simular busca de métricas
-          setMetrics({
-            totalConversations: 357,
-            totalMessages: 4289,
-            averageMessagesPerConversation: 12,
-            mostActiveUsers: [
-              { name: 'Maria Silva', conversations: 28 },
-              { name: 'João Santos', conversations: 23 },
-              { name: 'Ana Oliveira', conversations: 19 }
-            ],
-            popularTopics: [
-              { topic: 'Manifestação', count: 142 },
-              { topic: 'Práticas Guiadas', count: 98 },
-              { topic: 'Diário Quântico', count: 76 }
-            ]
-          });
+      // Chamadas à API específicas para cada aba
+      if (tabValue === 0) {
+        // Buscar configurações da IA
+        const response = await axios.get('/api/admin/luzia/settings');
+        if (response.data.success) {
+          setSettings(response.data.data);
         }
-        
-        setLoading(false);
-      }, 800);
+      } else if (tabValue === 1) {
+        // Buscar base de conhecimento
+        const response = await axios.get('/api/admin/luzia/knowledgebase');
+        if (response.data.success) {
+          setKnowledgeBase(response.data.data);
+        }
+      } else if (tabValue === 2) {
+        // Buscar histórico de conversas
+        const response = await axios.get('/api/admin/luzia/conversations');
+        if (response.data.success) {
+          setConversations(response.data.data);
+        }
+      } else if (tabValue === 3) {
+        // Buscar métricas
+        const response = await axios.get('/api/admin/luzia/metrics');
+        if (response.data.success) {
+          setMetrics(response.data.data);
+        }
+      }
+      
+      setLoading(false);
     } catch (error) {
       console.error('Erro ao buscar dados:', error);
-      showError('Erro ao carregar dados');
+      showError('Erro ao carregar dados: ' + (error.response?.data?.error || 'Erro de conexão'));
       setLoading(false);
     }
   };
@@ -159,17 +139,17 @@ const LuzIAManagement = () => {
   const handleSaveSettings = async () => {
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // await axios.put('/api/admin/luzia/settings', settings);
+      const response = await axios.put('/api/admin/luzia/settings', settings);
       
-      // Simulação para demonstração
-      setTimeout(() => {
+      if (response.data.success) {
         showSuccess('Configurações salvas com sucesso');
-        setLoading(false);
-      }, 800);
+      } else {
+        showError('Erro ao salvar configurações: ' + response.data.error);
+      }
+      setLoading(false);
     } catch (error) {
       console.error('Erro ao salvar configurações:', error);
-      showError('Erro ao salvar configurações');
+      showError('Erro ao salvar configurações: ' + (error.response?.data?.error || 'Erro de conexão'));
       setLoading(false);
     }
   };
@@ -199,32 +179,28 @@ const LuzIAManagement = () => {
     
     try {
       setUploadingFile(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // const formData = new FormData();
-      // formData.append('file', fileToUpload);
-      // formData.append('description', fileDescription);
-      // await axios.post('/api/admin/luzia/knowledgebase', formData);
+      const formData = new FormData();
+      formData.append('file', fileToUpload);
+      formData.append('description', fileDescription);
       
-      // Simulação para demonstração
-      setTimeout(() => {
-        const newFile = {
-          id: Date.now(),
-          name: fileToUpload.name,
-          size: `${(fileToUpload.size / 1024).toFixed(1)} KB`,
-          type: fileToUpload.type.split('/')[1] || 'document',
-          uploaded: new Date().toISOString().split('T')[0],
-          description: fileDescription,
-          status: 'processing'
-        };
-        
-        setKnowledgeBase(prev => [newFile, ...prev]);
+      const response = await axios.post('/api/admin/luzia/knowledgebase', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      if (response.data.success) {
+        // Atualizar a lista de arquivos com o novo arquivo
+        await fetchData();
         showSuccess('Arquivo enviado para processamento');
-        setUploadingFile(false);
         handleAddFileDialogClose();
-      }, 1500);
+      } else {
+        showError('Erro ao fazer upload do arquivo: ' + response.data.error);
+      }
+      setUploadingFile(false);
     } catch (error) {
       console.error('Erro ao fazer upload do arquivo:', error);
-      showError('Erro ao fazer upload do arquivo');
+      showError('Erro ao fazer upload do arquivo: ' + (error.response?.data?.error || 'Erro de conexão'));
       setUploadingFile(false);
     }
   };
@@ -232,18 +208,19 @@ const LuzIAManagement = () => {
   const handleDeleteFile = async (fileId) => {
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // await axios.delete(\`/api/admin/luzia/knowledgebase/$\{fileId}\`);
+      const response = await axios.delete(`/api/admin/luzia/knowledgebase/${fileId}`);
       
-      // Simulação para demonstração
-      setTimeout(() => {
-        setKnowledgeBase(prev => prev.filter(file => file.id !== fileId));
+      if (response.data.success) {
+        // Atualizar a lista de arquivos
+        await fetchData();
         showSuccess('Arquivo removido da base de conhecimento');
-        setLoading(false);
-      }, 500);
+      } else {
+        showError('Erro ao remover arquivo: ' + response.data.error);
+      }
+      setLoading(false);
     } catch (error) {
       console.error('Erro ao remover arquivo:', error);
-      showError('Erro ao remover arquivo');
+      showError('Erro ao remover arquivo: ' + (error.response?.data?.error || 'Erro de conexão'));
       setLoading(false);
     }
   };
@@ -265,17 +242,17 @@ const LuzIAManagement = () => {
     
     try {
       setLoading(true);
-      // Na implementação real, faríamos uma chamada à API:
-      // await axios.post('/api/admin/luzia/knowledgebase/reset');
+      const response = await axios.post('/api/admin/luzia/knowledgebase/reset');
       
-      // Simulação para demonstração
-      setTimeout(() => {
+      if (response.data.success) {
         showSuccess('Base de conhecimento está sendo reprocessada');
-        setLoading(false);
-      }, 800);
+      } else {
+        showError('Erro ao resetar base de conhecimento: ' + response.data.error);
+      }
+      setLoading(false);
     } catch (error) {
       console.error('Erro ao resetar base de conhecimento:', error);
-      showError('Erro ao resetar base de conhecimento');
+      showError('Erro ao resetar base de conhecimento: ' + (error.response?.data?.error || 'Erro de conexão'));
       setLoading(false);
     }
   };

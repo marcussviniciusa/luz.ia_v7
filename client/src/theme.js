@@ -23,7 +23,8 @@ const theme = createTheme({
     background: {
       default: '#F8F8F8',
       paper: '#FFFFFF',
-      emerald: '#2E7D32', // Verde texturizado para fundos
+      emerald: '#0c2816', // Verde escuro texturizado para fundos (estilo admin)
+      emeraldLight: '#2E7D32', // Verde original (mantido para compatibilidade)
     },
     text: {
       primary: '#212121',
