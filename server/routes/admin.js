@@ -1,4 +1,5 @@
 const express = require('express');
+const luziAdminRouter = require('./admin/luz-ia-admin');
 const {
   getUsers,
   getPendingUsers,
@@ -46,9 +47,12 @@ router.put('/users/:id/deactivate', deactivateUser);
 router.get('/stats', getStats);
 router.get('/recent-activities', getRecentActivities);
 
-// Rotas para gerenciamento da LUZ IA
+// Rotas para gerenciamento da LUZ IA (legado)
 router.put('/luz-ia/knowledge', updateLuzIAKnowledge);
 router.get('/luz-ia/prompts', getLuzIAPrompts);
 router.put('/luz-ia/prompts/:name', updateLuzIAPrompt);
+
+// Novas rotas para gerenciamento completo da LUZ IA
+router.use('/luzia', luziAdminRouter);
 
 module.exports = router;

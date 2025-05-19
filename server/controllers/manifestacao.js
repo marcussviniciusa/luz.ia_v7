@@ -88,31 +88,65 @@ exports.createManifestacao = asyncHandler(async (req, res, next) => {
   }
   
   // Adicionar imagem se enviada
-  if (req.file) {
+  if (req.files && req.files.imagem) {
     try {
-      const fs = require('fs');
-      const path = require('path');
+      const imagemFile = req.files.imagem;
+      const bucketName = process.env.MINIO_BUCKET_NAME;
       
-      // Gerar nome único para o arquivo no MinIO
-      const fileExt = path.extname(req.file.originalname);
-      const objectName = `manifestacoes/${req.user.id}/${Date.now()}${fileExt}`;
+      // Verificar se o bucket existe
+      const bucketExists = await minioClient.bucketExists(bucketName);
+      console.log(`Bucket ${bucketName} existe? ${bucketExists}`);
       
-      // Fazer upload para o MinIO
-      await minioClient.putObject(
-        process.env.MINIO_BUCKET_NAME,
-        objectName,
-        fs.createReadStream(req.file.path),
-        req.file.size,
-        { 'Content-Type': req.file.mimetype }
-      );
+      if (!bucketExists) {
+        console.log(`Criando bucket ${bucketName}...`);
+        await minioClient.makeBucket(bucketName);
+      }
       
+      // Obter a extensão do arquivo original
+      const fileExt = path.extname(imagemFile.name) || '.jpg';
+      const objectName = `manifestacoes/${req.user.id}/${Date.now()}-${uuidv4()}${fileExt}`;
+      
+      // Definir metadados para o arquivo
+      const metaData = {
+        'Content-Type': imagemFile.mimetype,
+        'X-Amz-Meta-Original-Filename': imagemFile.name
+      };
+      
+      console.log(`Iniciando upload de imagem para MinIO bucket=${bucketName}, file=${objectName}`);
+      
+      if (imagemFile.tempFilePath) {
+        console.log('Usando arquivo temporário para upload de imagem:', imagemFile.tempFilePath);
+        
+        // Upload do arquivo para o MinIO usando o arquivo temporário
+        await minioClient.fPutObject(
+          bucketName, 
+          objectName, 
+          imagemFile.tempFilePath,
+          metaData
+        );
+      } else if (imagemFile.data) {
+        console.log('Usando dados em memória para upload de imagem');
+        
+        // Salvar temporariamente os dados em um arquivo
+        const tempPath = `/tmp/upload-manifestacao-${Date.now()}.tmp`;
+        fs.writeFileSync(tempPath, imagemFile.data);
+        
+        // Upload do arquivo temporário
+        await minioClient.fPutObject(
+          bucketName, 
+          objectName, 
+          tempPath,
+          metaData
+        );
+        
+        // Remover o arquivo temporário
+        fs.unlinkSync(tempPath);
+      }
+      
+      console.log('Arquivo de imagem salvo com sucesso');
+
       // Gerar URL via proxy interno para a imagem
-      // Isso evita problemas de CORS e de resolução de DNS
       const imageUrl = `/api/proxy/minio/${objectName}`;
-      
-      // Log para debug
-      console.log(`URL da imagem gerada via proxy: ${imageUrl}`);
-      console.log(`Nome do objeto no MinIO: ${objectName}`);
       
       // Adicionar informações da imagem ao documento
       manifestacaoData.imagens = [{
@@ -121,17 +155,11 @@ exports.createManifestacao = asyncHandler(async (req, res, next) => {
         descricao: req.body.descricao || ''
       }];
       
-      // Remover arquivo temporário
-      fs.unlinkSync(req.file.path);
-      
       console.log(`Imagem enviada com sucesso para ${imageUrl}`);
     } catch (error) {
       console.error('Erro ao fazer upload da imagem:', error);
       // Não interromper a criação da manifestação se o upload falhar
-      manifestacaoData.imagens = [{
-        path: req.file.path,
-        descricao: req.body.descricao || ''
-      }];
+      manifestacaoData.imagens = [];
     }
   }
   

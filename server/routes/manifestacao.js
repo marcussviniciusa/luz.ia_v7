@@ -15,7 +15,6 @@ const {
 } = require('../controllers/manifestacao');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
@@ -24,11 +23,8 @@ const Manifestacao = require('../models/Manifestacao');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 
-// Configuração do multer para upload temporário
-const upload = multer({
-  dest: 'tmp/uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 } // Limite de 10MB
-});
+// Nota: Removido multer pois estamos usando express-fileupload configurado globalmente
+// com limitação de 50MB já configurada
 
 // Proteger todas as rotas
 router.use(protect);
@@ -36,19 +32,19 @@ router.use(protect);
 // Rotas principais
 router.route('/')
   .get(getManifestacoes)
-  .post(upload.single('imagem'), createManifestacao);
+  .post(createManifestacao);
 
 // Nota: As rotas específicas para tipos de manifestação foram removidas
 // pois agora estamos fazendo a filtragem por tipo no lado cliente
 
 router.route('/:id')
   .get(getManifestacao)
-  .put(upload.single('imagem'), updateManifestacao)
+  .put(updateManifestacao)
   .delete(deleteManifestacao);
 
 // Upload de imagem para o quadro de visualização
-router.post('/:id/imagem', upload.single('imagem'), asyncHandler(async (req, res, next) => {
-  if (!req.file) {
+router.post('/:id/imagem', asyncHandler(async (req, res, next) => {
+  if (!req.files || !req.files.imagem) {
     return next(new ErrorResponse('Por favor, envie uma imagem', 400));
   }
   
@@ -60,69 +56,100 @@ router.post('/:id/imagem', upload.single('imagem'), asyncHandler(async (req, res
     );
   }
   
-  // Verificar se o item pertence ao usuário
+  // Verificar permissão
   if (manifestacao.user.toString() !== req.user.id) {
     return next(
-      new ErrorResponse('Não autorizado a modificar este item', 401)
-    );
-  }
-  
-  // Verificar se é um quadro de visualização
-  if (manifestacao.tipo !== 'quadro') {
-    return next(
-      new ErrorResponse('Este item não é um quadro de visualização', 400)
+      new ErrorResponse(`Usuário não autorizado a editar este item`, 403)
     );
   }
   
   try {
-    const fileExtension = path.extname(req.file.originalname);
-    const fileName = `manifestacao/quadro/${req.user.id}/${uuidv4()}${fileExtension}`;
+    const imagemFile = req.files.imagem;
+    const bucketName = process.env.MINIO_BUCKET_NAME;
     
-    // Upload do arquivo para o MinIO
-    await minioClient.fPutObject(
-      process.env.MINIO_BUCKET_NAME,
-      fileName,
-      req.file.path,
-      { 'Content-Type': req.file.mimetype }
-    );
+    // Verificar se o bucket existe
+    const bucketExists = await minioClient.bucketExists(bucketName);
+    console.log(`Bucket ${bucketName} existe? ${bucketExists}`);
+    
+    if (!bucketExists) {
+      console.log(`Criando bucket ${bucketName}...`);
+      await minioClient.makeBucket(bucketName);
+    }
+    
+    // Obter a extensão do arquivo original
+    const fileExt = path.extname(imagemFile.name) || '.jpg';
+    const objectName = `manifestacoes/${req.user.id}/${Date.now()}-${uuidv4()}${fileExt}`;
+    
+    // Definir metadados para o arquivo
+    const metaData = {
+      'Content-Type': imagemFile.mimetype,
+      'X-Amz-Meta-Original-Filename': imagemFile.name
+    };
+    
+    console.log(`Iniciando upload de imagem para MinIO bucket=${bucketName}, file=${objectName}`);
+    
+    if (imagemFile.tempFilePath) {
+      console.log('Usando arquivo temporário para upload de imagem:', imagemFile.tempFilePath);
+      
+      // Upload do arquivo para o MinIO usando o arquivo temporário
+      await minioClient.fPutObject(
+        bucketName, 
+        objectName, 
+        imagemFile.tempFilePath,
+        metaData
+      );
+    } else if (imagemFile.data) {
+      console.log('Usando dados em memória para upload de imagem');
+      
+      // Salvar temporariamente os dados em um arquivo
+      const tempPath = `/tmp/upload-manifestacao-${Date.now()}.tmp`;
+      fs.writeFileSync(tempPath, imagemFile.data);
+      
+      // Upload do arquivo temporário
+      await minioClient.fPutObject(
+        bucketName, 
+        objectName, 
+        tempPath,
+        metaData
+      );
+      
+      // Remover o arquivo temporário
+      fs.unlinkSync(tempPath);
+    }
+    
+    console.log('Arquivo de imagem salvo com sucesso');
     
     // Gerar URL via proxy interno para a imagem
-    // Isso evita problemas de CORS e de resolução de DNS
-    const imageUrl = `/api/proxy/minio/${fileName}`;
+    const imageUrl = `/api/proxy/minio/${objectName}`;
     
-    // Log para debug
-    console.log(`URL da imagem gerada via proxy (upload): ${imageUrl}`);
-    console.log(`Nome do objeto no MinIO: ${fileName}`);
-    
-    // Adicionar imagem ao quadro
-    manifestacao.imagens.push({
+    // Adicionar informações da imagem ao documento
+    const novaImagem = {
       path: imageUrl,
-      objectName: fileName,
+      objectName: objectName,
       descricao: req.body.descricao || ''
-    });
+    };
     
-    manifestacao.updatedAt = Date.now();
+    // Verificar se já existem imagens
+    if (!manifestacao.imagens) {
+      manifestacao.imagens = [];
+    }
     
+    manifestacao.imagens.push(novaImagem);
     await manifestacao.save();
-    
-    // Remover arquivo temporário
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error('Erro ao remover arquivo temporário:', err);
-    });
     
     res.status(200).json({
       success: true,
-      data: manifestacao
+      data: novaImagem
     });
   } catch (error) {
-    console.error('Erro ao fazer upload de imagem:', error);
-    return next(new ErrorResponse('Erro ao fazer upload de imagem', 500));
+    console.error('Erro ao fazer upload da imagem:', error);
+    next(new ErrorResponse(`Erro ao fazer upload da imagem: ${error.message}`, 500));
   }
 }));
 
 // Upload de símbolo pessoal
-router.post('/:id/simbolo', upload.single('simbolo'), asyncHandler(async (req, res, next) => {
-  if (!req.file) {
+router.post('/:id/simbolo', asyncHandler(async (req, res, next) => {
+  if (!req.files || !req.files.simbolo) {
     return next(new ErrorResponse('Por favor, envie uma imagem para o símbolo', 400));
   }
   
@@ -149,26 +176,67 @@ router.post('/:id/simbolo', upload.single('simbolo'), asyncHandler(async (req, r
   }
   
   try {
-    const fileExtension = path.extname(req.file.originalname);
-    const fileName = `manifestacao/simbolo/${req.user.id}/${uuidv4()}${fileExtension}`;
+    const simboloFile = req.files.simbolo;
+    const bucketName = process.env.MINIO_BUCKET_NAME;
+    
+    // Obter a extensão do arquivo original
+    const fileExt = path.extname(simboloFile.name) || '.jpg';
+    const fileName = `manifestacao/simbolo/${req.user.id}/${Date.now()}-${uuidv4()}${fileExt}`;
+    
+    // Verificar se o bucket existe
+    const bucketExists = await minioClient.bucketExists(bucketName);
+    if (!bucketExists) {
+      console.log(`Criando bucket ${bucketName}...`);
+      await minioClient.makeBucket(bucketName);
+    }
     
     // Se já existe um símbolo, remover do MinIO
-    if (manifestacao.simboloPath) {
+    if (manifestacao.symbolObjectName) {
       try {
-        await minioClient.removeObject(process.env.MINIO_BUCKET_NAME, manifestacao.simboloPath);
+        await minioClient.removeObject(bucketName, manifestacao.symbolObjectName);
+        console.log('Símbolo antigo removido com sucesso');
       } catch (error) {
         console.error('Erro ao remover símbolo antigo:', error);
         // Continuar mesmo com erro
       }
     }
     
-    // Upload do arquivo para o MinIO
-    await minioClient.fPutObject(
-      process.env.MINIO_BUCKET_NAME,
-      fileName,
-      req.file.path,
-      { 'Content-Type': req.file.mimetype }
-    );
+    // Definir metadados para o arquivo
+    const metaData = {
+      'Content-Type': simboloFile.mimetype,
+      'X-Amz-Meta-Original-Filename': simboloFile.name
+    };
+    
+    console.log(`Iniciando upload de símbolo para MinIO bucket=${bucketName}, file=${fileName}`);
+    
+    if (simboloFile.tempFilePath) {
+      console.log('Usando arquivo temporário para upload de símbolo:', simboloFile.tempFilePath);
+      
+      // Upload do arquivo para o MinIO usando o arquivo temporário
+      await minioClient.fPutObject(
+        bucketName, 
+        fileName, 
+        simboloFile.tempFilePath,
+        metaData
+      );
+    } else if (simboloFile.data) {
+      console.log('Usando dados em memória para upload de símbolo');
+      
+      // Salvar temporariamente os dados em um arquivo
+      const tempPath = `/tmp/upload-simbolo-${Date.now()}.tmp`;
+      fs.writeFileSync(tempPath, simboloFile.data);
+      
+      // Upload do arquivo temporário
+      await minioClient.fPutObject(
+        bucketName, 
+        fileName, 
+        tempPath,
+        metaData
+      );
+      
+      // Remover o arquivo temporário
+      fs.unlinkSync(tempPath);
+    }
     
     // Gerar URL via proxy interno para a imagem
     // Isso evita problemas de CORS e de resolução de DNS
@@ -184,11 +252,6 @@ router.post('/:id/simbolo', upload.single('simbolo'), asyncHandler(async (req, r
     manifestacao.updatedAt = Date.now();
     
     await manifestacao.save();
-    
-    // Remover arquivo temporário
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error('Erro ao remover arquivo temporário:', err);
-    });
     
     res.status(200).json({
       success: true,

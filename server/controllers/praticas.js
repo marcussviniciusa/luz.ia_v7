@@ -255,76 +255,43 @@ exports.uploadPraticaFiles = asyncHandler(async (req, res, next) => {
   // Processar upload de áudio
   if (req.files && req.files.audioFile) {
     const audioFile = req.files.audioFile;
-    const audioFileName = `praticas/${Date.now()}-${uuidv4()}.mp3`;
+    // Usar o formato original do arquivo em vez de converter para mp3
+    const extensao = audioFile.name.split('.').pop() || 'mp3';
+    const audioFileName = `praticas/${Date.now()}-${uuidv4()}.${extensao}`;
     
-    console.log('=========== UPLOAD DE ÁUDIO ===========');
     console.log('Salvando arquivo de áudio:', audioFileName);
-    console.log('Informações do arquivo:', {
-      nome: audioFile.name,
-      tamanho: audioFile.size,
-      tipo: audioFile.mimetype,
-      md5: audioFile.md5
-    });
-    console.log('Conteúdo do req.files:', Object.keys(req.files));
-    console.log('Prática antes da atualização - ID:', pratica._id);
-    console.log('Prática antes da atualização - AudioPath:', pratica.audioPath || 'Vazio');
-    console.log('======================================');
-    
-    // Verificar se temos um arquivo temporário ou dados do arquivo
-    if (!audioFile.tempFilePath && (!audioFile.data || audioFile.data.length === 0)) {
-      console.error('ERRO: Dados do arquivo estão vazios e não há arquivo temporário!');
-      return next(new ErrorResponse('Os dados do arquivo de áudio estão vazios', 400));
-    }
-    
-    console.log('Arquivo temporário:', audioFile.tempFilePath || 'Não disponível');
-    console.log('Tamanho do arquivo:', audioFile.size);
-    
-    // Definir metadados para o arquivo
-    const metaData = {
-      'Content-Type': audioFile.mimetype,
-      'X-Amz-Meta-Original-Filename': audioFile.name
-    };
     
     try {
-      // Primeiro fazemos o upload do arquivo para o MinIO
-      console.log(`Iniciando upload para MinIO bucket=${bucketName}, file=${audioFileName}`);
+      // Primeiro salvar o arquivo em um caminho temporário próprio
+      const tempPath = `/tmp/upload-audio-${Date.now()}.${extensao}`;
       
-      // Verificar se estamos trabalhando com arquivo temporário ou dados em memória
       if (audioFile.tempFilePath) {
-        console.log('Usando arquivo temporário para upload:', audioFile.tempFilePath);
-        const fs = require('fs');
-        // Ler o arquivo temporário e fazer upload
-        const fileStream = fs.createReadStream(audioFile.tempFilePath);
-        await minioClient.putObject(bucketName, audioFileName, fileStream, audioFile.size, metaData);
-      } else {
-        console.log('Usando dados em memória para upload, tamanho:', audioFile.data ? audioFile.data.length : 0);
-        await minioClient.putObject(bucketName, audioFileName, audioFile.data, audioFile.size, metaData);
+        // Copiar o arquivo temporário para nosso próprio temporário
+        fs.copyFileSync(audioFile.tempFilePath, tempPath);
+      } else if (audioFile.data) {
+        // Salvar os dados em memória no arquivo temporário
+        fs.writeFileSync(tempPath, audioFile.data);
       }
       
-      console.log('Upload para MinIO concluído com sucesso');
+      // Definir metadados simplificados
+      const metaData = {
+        'Content-Type': audioFile.mimetype
+      };
       
-      // Depois de confirmar o upload bem-sucedido, atualizamos o caminho na prática
-      console.log('Antes de atualizar o audioPath:', pratica.audioPath);
+      console.log(`Iniciando upload para MinIO bucket=${bucketName}, file=${audioFileName}, de: ${tempPath}`);
+
+      // Tentar fazer o upload de forma mais simples e direta
+      await minioClient.fPutObject(bucketName, audioFileName, tempPath, metaData);
       
-      // Forçar a atualização do caminho do áudio
+      // Limpar o arquivo temporário
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+      
+      console.log('Arquivo de áudio salvo com sucesso');
+      
+      // Atualizar o caminho do áudio na prática
       pratica.audioPath = audioFileName;
-      
-      // Registrar a mudança para diagnóstico
-      console.log('Depois de atualizar o audioPath:', pratica.audioPath);
-      console.log('audioFileName:', audioFileName);
-      
-      // Verificar se o arquivo existe após o upload
-      try {
-        const stat = await minioClient.statObject(bucketName, audioFileName);
-        console.log('Arquivo confirmado no MinIO:', {
-          tamanho: stat.size,
-          última_modificação: stat.lastModified
-        });
-      } catch (statError) {
-        console.warn('Aviso: Falha ao verificar arquivo após upload:', statError.message);
-      }
-      
-      console.log('Arquivo de áudio salvo com sucesso no bucket', bucketName);
     } catch (error) {
       console.error('Erro ao fazer upload do áudio para MinIO:', error);
       return next(new ErrorResponse(`Erro ao fazer upload do áudio: ${error.message}`, 500));
@@ -353,13 +320,57 @@ exports.uploadPraticaFiles = asyncHandler(async (req, res, next) => {
       // Verificar se estamos trabalhando com arquivo temporário ou dados em memória
       if (imagemFile.tempFilePath) {
         console.log('Usando arquivo temporário para upload de imagem:', imagemFile.tempFilePath);
-        const fs = require('fs');
-        // Ler o arquivo temporário e fazer upload
-        const fileStream = fs.createReadStream(imagemFile.tempFilePath);
-        await minioClient.putObject(bucketName, imagemFileName, fileStream, imagemFile.size, metaData);
+        
+        try {
+          // Upload usando o método fputObject (recomendado para arquivos locais)
+          await new Promise((resolve, reject) => {
+            minioClient.fPutObject(
+              bucketName, 
+              imagemFileName, 
+              imagemFile.tempFilePath,
+              metaData,
+              (err, etag) => {
+                if (err) return reject(err);
+                console.log('Upload de imagem bem-sucedido, etag:', etag);
+                resolve(etag);
+              }
+            );
+          });
+        } catch (uploadError) {
+          console.error('Erro específico no upload da imagem:', uploadError);
+          throw uploadError;
+        }
       } else {
         console.log('Usando dados em memória para upload de imagem, tamanho:', imagemFile.data ? imagemFile.data.length : 0);
-        await minioClient.putObject(bucketName, imagemFileName, imagemFile.data, imagemFile.size, metaData);
+        
+        // Salvar temporariamente os dados em um arquivo para usar fPutObject
+        const tempPath = `/tmp/upload-img-${Date.now()}.tmp`;
+        fs.writeFileSync(tempPath, imagemFile.data);
+        
+        try {
+          await new Promise((resolve, reject) => {
+            minioClient.fPutObject(
+              bucketName, 
+              imagemFileName, 
+              tempPath,
+              metaData,
+              (err, etag) => {
+                if (err) return reject(err);
+                console.log('Upload de imagem bem-sucedido, etag:', etag);
+                resolve(etag);
+              }
+            );
+          });
+          
+          // Remover o arquivo temporário
+          fs.unlinkSync(tempPath);
+        } catch (uploadError) {
+          // Remover o arquivo temporário em caso de erro
+          if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+          throw uploadError;
+        }
       }
       
       pratica.imagemCapa = imagemFileName;

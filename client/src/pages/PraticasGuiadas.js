@@ -172,43 +172,58 @@ function PraticasGuiadas() {
   
   // Configurar audio player
   useEffect(() => {
-    if (audioRef.current) {
-      // Manipuladores de eventos de áudio
-      const handleTimeUpdate = () => {
-        setCurrentTime(audioRef.current.currentTime);
-      };
-      
-      const handleLoadedMetadata = () => {
-        setDuration(audioRef.current.duration);
-      };
-      
-      const handleEnded = () => {
-        setIsPlaying(false);
-        setCurrentTime(0);
-        // Registrar conclusão da prática
-        if (selectedPratica) {
-          registrarPraticaConcluida(selectedPratica._id);
-        }
-      };
-      
-      // Definir volume inicial
-      audioRef.current.volume = volume;
-      
-      // Adicionar event listeners
-      audioRef.current.addEventListener('timeupdate', handleTimeUpdate);
-      audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata);
-      audioRef.current.addEventListener('ended', handleEnded);
-      
-      // Limpar event listeners
-      return () => {
-        if (audioRef.current) {
-          audioRef.current.removeEventListener('timeupdate', handleTimeUpdate);
-          audioRef.current.removeEventListener('loadedmetadata', handleLoadedMetadata);
-          audioRef.current.removeEventListener('ended', handleEnded);
-        }
-      };
+    // Só configurar listeners se tivermos uma prática selecionada e o audioRef estiver disponível
+    if (!selectedPratica || !audioRef.current) return;
+    
+    // Capturar uma referência local ao elemento de áudio atual para evitar problemas de cleanup
+    const audioElement = audioRef.current;
+    
+    // Manipuladores de eventos de áudio com verificações de segurança
+    const handleTimeUpdate = () => {
+      // Verificar se o elemento ainda existe antes de usar
+      if (audioElement && !isNaN(audioElement.currentTime)) {
+        setCurrentTime(audioElement.currentTime);
+      }
+    };
+    
+    const handleLoadedMetadata = () => {
+      if (audioElement && !isNaN(audioElement.duration)) {
+        setDuration(audioElement.duration);
+      }
+    };
+    
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+      // Registrar conclusão da prática
+      if (selectedPratica) {
+        registrarPraticaConcluida(selectedPratica._id);
+      }
+    };
+    
+    // Definir volume inicial, com verificação
+    if (audioElement) {
+      try {
+        audioElement.volume = volume;
+      } catch (err) {
+        console.log('Erro ao definir volume:', err);
+      }
     }
-  }, [selectedPratica]);
+    
+    // Adicionar event listeners ao elemento local
+    audioElement.addEventListener('timeupdate', handleTimeUpdate);
+    audioElement.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audioElement.addEventListener('ended', handleEnded);
+    
+    // Limpar event listeners usando a mesma referência local
+    return () => {
+      // Usando a referência capturada no momento da montagem, 
+      // não a referência atual que pode ter mudado
+      audioElement.removeEventListener('timeupdate', handleTimeUpdate);
+      audioElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audioElement.removeEventListener('ended', handleEnded);
+    };
+  }, [selectedPratica, volume]);
   
   // Registrar prática concluída
   const registrarPraticaConcluida = async (praticaId) => {
@@ -249,32 +264,56 @@ function PraticasGuiadas() {
     setCurrentTime(0);
     setDuration(0);
     
-    // Iniciar reprodução após carregar metadados
-    setTimeout(() => {
-      if (audioRef.current) {
-        audioRef.current.play()
-          .then(() => setIsPlaying(true))
-          .catch(error => {
-            console.error('Erro ao reproduzir áudio:', error);
-            showError('Não foi possível reproduzir o áudio. Tente novamente.');
-          });
+    // Usar um timeout para garantir que a UI seja atualizada antes de tentar reproduzir
+    setTimeout(async () => {
+      try {
+        if (audioRef.current) {
+          // Garantir que qualquer reprodução anterior seja parada
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+          
+          // Garantir que o elemento de áudio esteja carregado
+          audioRef.current.load();
+          
+          // Esperar um pouco para o carregamento começar
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Verificar novamente se a referência ainda existe
+          if (!audioRef.current) return;
+          
+          // Tentar reproduzir o áudio
+          await audioRef.current.play();
+          setIsPlaying(true);
+        }
+      } catch (error) {
+        console.error('Erro ao reproduzir áudio:', error);
+        showError('Não foi possível reproduzir o áudio. Tente novamente.');
       }
-    }, 100);
+    }, 300);
   };
   
   // Alternar entre play e pause
-  const togglePlayPause = () => {
-    if (audioRef.current) {
+  const togglePlayPause = async () => {
+    if (!audioRef.current) return;
+    
+    try {
       if (isPlaying) {
+        // Se estiver tocando, pausar
         audioRef.current.pause();
+        setIsPlaying(false);
       } else {
-        audioRef.current.play()
-          .catch(error => {
-            console.error('Erro ao reproduzir áudio:', error);
-            showError('Não foi possível reproduzir o áudio. Tente novamente.');
-          });
+        // Se estiver pausado, garantir que o áudio está carregado antes de tentar reproduzir
+        const playPromise = audioRef.current.play();
+        
+        // Só atualiza o estado após a confirmação de que o áudio começou a tocar
+        if (playPromise !== undefined) {
+          await playPromise;
+          setIsPlaying(true);
+        }
       }
-      setIsPlaying(!isPlaying);
+    } catch (error) {
+      console.error('Erro ao reproduzir áudio:', error);
+      showError('Não foi possível reproduzir o áudio. Tente novamente.');
     }
   };
   
@@ -573,8 +612,26 @@ function PraticasGuiadas() {
           
           <audio 
             ref={audioRef} 
-            src={selectedPratica.audioUrl}
+            src={selectedPratica.audioPath ? `/api/proxy/minio/${selectedPratica.audioPath}` : ''}
             preload="auto"
+            crossOrigin="anonymous"
+            playsInline
+            onError={(e) => {
+              console.error('Erro no elemento de áudio:', e.target.error);
+              showError('Não foi possível carregar o áudio. Verifique sua conexão.');
+              setIsPlaying(false); // Garantir que o estado de reprodução seja resetado
+            }}
+            onEnded={() => {
+              console.log('Áudio finalizado naturalmente');
+              setIsPlaying(false);
+              setCurrentTime(0);
+            }}
+            onLoadedMetadata={(e) => {
+              console.log('Áudio carregado com sucesso, duração:', e.target.duration);
+              if (audioRef.current && !isNaN(audioRef.current.duration)) {
+                setDuration(audioRef.current.duration || 0);
+              }
+            }}
           />
           
           <Grid container alignItems="center" spacing={2}>

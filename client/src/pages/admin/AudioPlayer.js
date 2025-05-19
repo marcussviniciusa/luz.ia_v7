@@ -98,34 +98,51 @@ const AudioPlayer = ({ open, onClose, title, audioPath }) => {
     
     console.log('Tentando reproduzir áudio real de:', audioRef.current.src);
     
-    // Verificar se o áudio está carregado corretamente
-    audioRef.current.load(); // Forçar o carregamento do áudio
+    // Parar qualquer reprodução anterior
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     
-    // Tentar reproduzir o áudio após um pequeno delay para garantir que ele esteja carregado
-    setTimeout(() => {
-      if (audioRef.current) {
-        audioRef.current.play().then(() => {
-          console.log('Áudio iniciado com sucesso!');
-          setIsPlaying(true);
-          
-          // Atualizar o tempo atual a cada segundo
-          intervalRef.current = setInterval(() => {
-            if (audioRef.current) {
-              setCurrentTime(audioRef.current.currentTime);
-            }
-          }, 1000);
-        }).catch(error => {
-          console.error('Erro ao reproduzir áudio:', error);
-          setAudioError(true);
-          
-          // Log detalhado do erro
-          console.log('Detalhes do erro ao reproduzir:', {
-            name: error.name,
-            message: error.message,
-            audioSrc: audioRef.current.src
-          });
-          
-          // Verificar conexão com o MinIO
+    // Garantir que o áudio esteja pronto antes de tentar reproduzir
+    const prepareAndPlay = async () => {
+      try {
+        // Garantir que o áudio está pausado antes de tentar carregá-lo novamente
+        audioRef.current.pause();
+        
+        // Forçar o carregamento do áudio
+        audioRef.current.load();
+        
+        // Aguardar um tempo para garantir que o carregamento inicie
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        if (!audioRef.current) return; // Verificar se o componente ainda está montado
+        
+        // Tentar reproduzir o áudio
+        await audioRef.current.play();
+        
+        console.log('Áudio iniciado com sucesso!');
+        setIsPlaying(true);
+        
+        // Atualizar o tempo atual a cada segundo
+        intervalRef.current = setInterval(() => {
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+          }
+        }, 1000);
+      } catch (error) {
+        console.error('Erro ao reproduzir áudio:', error);
+        setAudioError(true);
+        
+        // Log detalhado do erro
+        console.log('Detalhes do erro ao reproduzir:', {
+          name: error.name,
+          message: error.message,
+          audioSrc: audioRef.current ? audioRef.current.src : 'audio ref não disponível'
+        });
+        
+        // Verificar conexão com o MinIO se o URL estiver definido
+        if (audioUrl) {
           axios.head(audioUrl)
             .then(response => {
               console.log('Arquivo existe no MinIO, mas não pode ser reproduzido:', response);
@@ -133,12 +150,15 @@ const AudioPlayer = ({ open, onClose, title, audioPath }) => {
             .catch(err => {
               console.log('Arquivo não existe no MinIO:', err);
             });
-          
-          // Fallback para áudio gerado
-          playSound();
-        });
+        }
+        
+        // Fallback para áudio gerado
+        playSound();
       }
-    }, 500);
+    };
+    
+    // Iniciar o processo de reprodução
+    prepareAndPlay();
   };
   
   // Reproduzir um tom de meditação (432Hz)
@@ -185,38 +205,62 @@ const AudioPlayer = ({ open, onClose, title, audioPath }) => {
   
   // Parar a reprodução
   const stopSound = useCallback(() => {
+    // Limpar o intervalo que atualiza o tempo
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    
+    // Redefinir o tempo atual
+    setCurrentTime(0);
+    startTimeRef.current = null;
+    
     try {
-      if (audioContext.current) {
-        // Limpar o intervalo que atualiza o tempo
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
+      // Se estivermos reproduzindo o áudio real
+      if (isRealAudio && audioRef.current) {
+        // Guardar uma referência local para evitar problemas com o React
+        const audio = audioRef.current;
+        
+        // Pausar o áudio antes de qualquer outra operação
+        audio.pause();
+        
+        // Silenciar o áudio para evitar picos de som durante a parada
+        try {
+          audio.volume = 0;
+        } catch (err) {
+          console.log('Erro ao ajustar volume:', err);
         }
         
-        // Redefinir o tempo atual
-        setCurrentTime(0);
-        startTimeRef.current = null;
-        
-        // Se estivermos reproduzindo o áudio real
-        if (isRealAudio && audioRef.current) {
-          audioRef.current.pause();
-          try {
-            audioRef.current.currentTime = 0;
-          } catch (err) {
-            console.log('Erro ao redefinir currentTime:', err);
-          }
+        // Redefinir a posição do áudio com try/catch para lidar com possíveis erros
+        try {
+          audio.currentTime = 0;
+        } catch (err) {
+          console.log('Erro ao redefinir currentTime:', err);
         }
       }
       
+      // Lidar com oscilador de áudio, se existir
       if (oscillator.current) {
-        oscillator.current.stop();
-        oscillator.current.disconnect();
+        try {
+          oscillator.current.stop();
+          oscillator.current.disconnect();
+          oscillator.current = null;
+        } catch (err) {
+          console.log('Erro ao parar oscilador:', err);
+        }
       }
       
+      // Lidar com o nó de ganho, se existir
       if (gainNode.current) {
-        gainNode.current.disconnect();
+        try {
+          gainNode.current.disconnect();
+          gainNode.current = null;
+        } catch (err) {
+          console.log('Erro ao desconectar gainNode:', err);
+        }
       }
       
+      // Desativar flag de reprodução
       setIsPlaying(false);
     } catch (error) {
       console.error('Erro ao parar reprodução de áudio:', error);
@@ -241,14 +285,20 @@ const AudioPlayer = ({ open, onClose, title, audioPath }) => {
       setIsPlaying(false);
       setAudioError(false);
       
-      if (audioPath && audioPath.trim() !== '') {
-        console.log('Carregando arquivo de áudio:', audioPath);
-        loadAudioFile();
-      } else {
-        // Se não há caminho de áudio, usamos o modo de fallback automaticamente
-        setIsRealAudio(false);
-        console.log('Nenhum arquivo de áudio fornecido, usando áudio gerado');
-      }
+      // Esperar um pouco antes de inicializar o áudio para garantir que o DOM esteja pronto
+      const initTimeout = setTimeout(() => {
+        if (audioPath && audioPath.trim() !== '') {
+          console.log('Carregando arquivo de áudio:', audioPath);
+          loadAudioFile();
+        } else {
+          // Se não há caminho de áudio, usamos o modo de fallback automaticamente
+          setIsRealAudio(false);
+          console.log('Nenhum arquivo de áudio fornecido, usando áudio gerado');
+        }
+      }, 200);
+      
+      // Limpar timeout se o componente for desmontado
+      return () => clearTimeout(initTimeout);
     }
     
     // Capturar uma refência ao elemento de áudio atual para evitar problemas de cleanup
@@ -284,25 +334,31 @@ const AudioPlayer = ({ open, onClose, title, audioPath }) => {
       fullWidth
     >
       {/* Elemento de áudio oculto para reprodução de arquivos reais */}
-      {isRealAudio && (
-        <audio 
-          ref={audioRef} 
-          src={audioUrl}
-          preload="metadata"
-          onLoadedMetadata={() => {
-            if (audioRef.current) {
-              setDuration(audioRef.current.duration);
-            }
-          }}
-          onEnded={() => {
-            setIsPlaying(false);
-            if (intervalRef.current) {
-              clearInterval(intervalRef.current);
-            }
-          }}
-          style={{ display: 'none' }}
-        />
-      )}
+      <audio 
+        ref={audioRef} 
+        src={isRealAudio ? audioUrl : ''}
+        preload="auto"
+        crossOrigin="anonymous"
+        playsInline
+        onLoadedMetadata={() => {
+          if (audioRef.current) {
+            console.log('Áudio carregado com duração:', audioRef.current.duration);
+            setDuration(audioRef.current.duration || 300);
+          }
+        }}
+        onEnded={() => {
+          console.log('Áudio concluído');
+          setIsPlaying(false);
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+          }
+        }}
+        onError={(e) => {
+          console.log('Erro no elemento de áudio:', e.target.error);
+          setAudioError(true);
+        }}
+        style={{ display: 'none' }}
+      />
       <DialogTitle>
         <Box display="flex" justifyContent="space-between" alignItems="center">
           Reprodução de Áudio
