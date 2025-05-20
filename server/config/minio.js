@@ -1,16 +1,33 @@
 const Minio = require('minio');
 const fs = require('fs');
 
-// Configuração otimizada para compatibilidade máxima com S3 sem necessidade do AWS SDK
+// Configuração otimizada especificamente para resolver problemas de SignatureDoesNotMatch
 const minioConfig = {
+  // Configuração básica
   endPoint: process.env.MINIO_ENDPOINT,
   port: parseInt(process.env.MINIO_PORT) || 443,
   useSSL: process.env.MINIO_USE_SSL === 'true',
   accessKey: process.env.MINIO_ACCESS_KEY,
   secretKey: process.env.MINIO_SECRET_KEY,
   region: process.env.MINIO_REGION || 'us-east-1',
-  s3ForcePathStyle: true,
-  partSize: 10 * 1024 * 1024,  // 10MB por parte para uploads
+  
+  // Opções para resolver problemas de "SignatureDoesNotMatch"
+  pathStyle: true, // Usar path-style URLs
+  s3ForcePathStyle: true, // Forçar path-style mesmo quando você tem subdomínios
+  
+  // IMPORTANTE: Tamanho mínimo de parte aceito pelo MinIO é 5MB
+  partSize: 5 * 1024 * 1024, // 5MB é o valor mínimo exigido pela biblioteca
+  
+  // Não configurar transporte personalizado, usar configurações padrão
+  // Isso evita o erro 'transport.request is not a function'
+
+  
+  // Não tentar melhorar performance com conexões persistentes (reduz erros de assinatura)
+  connectTimeout: 10000, // 10 segundos
+  requestTimeout: 30000, // 30 segundos
+  maxRetries: 2,
+  
+  // Usar versão v4 de assinatura (padrão AWS mais compatível)
   signatureVersion: 'v4'
 };
 
@@ -29,49 +46,112 @@ console.log('Configuração MinIO:', {
 // Configuração do cliente MinIO com tratamento de erro
 const minioClient = new Minio.Client(minioConfig);
 
-// Função auxiliar para tentar upload com diferentes configurações
-const retryUpload = async (bucketName, objectName, fileStream, fileSize, metaData, maxRetries = 3) => {
+// Função auxiliar para tentar upload com diferentes configurações e abordagens
+const retryUpload = async (bucketName, objectName, fileStream, fileSize, metaData, maxRetries = 5) => {
   let lastError = null;
   
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      // Ajustar o tamanho da parte em cada tentativa
-      const partSizeOptions = [
-        10 * 1024 * 1024, // 10MB padrão
-        5 * 1024 * 1024,  // 5MB - padrão AWS
-        16 * 1024 * 1024  // 16MB - para arquivos maiores
-      ];
+  // Estratégias de upload diferentes para maior robustez
+  const strategies = [
+    // Estratégia 1: Upload direto com tamanho pequeno (abordagem mais simples)
+    async () => {
+      console.log('Tentando estratégia 1: Upload simples com 5MB');
+      const client = new Minio.Client({
+        ...minioConfig,
+        partSize: 5 * 1024 * 1024
+      });
       
-      // Usar uma configuração diferente para cada tentativa
-      const partSize = partSizeOptions[attempt % partSizeOptions.length];
-      console.log(`Tentativa ${attempt} usando partSize de ${partSize / (1024 * 1024)}MB`);
-      
-      // O método putObject é mais confiável para o seu caso
-      await new Promise((resolve, reject) => {
-        const tempClient = new Minio.Client({
-          ...minioConfig,
-          partSize: partSize
-        });
-        
-        tempClient.putObject(bucketName, objectName, fileStream, fileSize, metaData, (err) => {
+      return new Promise((resolve, reject) => {
+        client.putObject(bucketName, objectName, fileStream, metaData, (err) => {
           if (err) return reject(err);
           resolve();
         });
       });
+    },
+    
+    // Estratégia 2: Upload com tamanho de parte médio
+    async () => {
+      console.log('Tentando estratégia 2: Upload com 10MB');
+      const client = new Minio.Client({
+        ...minioConfig,
+        partSize: 10 * 1024 * 1024
+      });
       
-      return true; // Upload bem-sucedido
-    } catch (error) {
-      lastError = error;
-      console.log(`Falha na tentativa ${attempt}: ${error.code || error.message}`);
+      return new Promise((resolve, reject) => {
+        client.putObject(bucketName, objectName, fileStream, fileSize, metaData, (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    },
+    
+    // Estratégia 3: Upload com tamanho específico e sem especificar o tamanho total
+    async () => {
+      console.log('Tentando estratégia 3: Upload sem especificar tamanho total');
+      const client = new Minio.Client({
+        ...minioConfig,
+        partSize: 8 * 1024 * 1024 
+      });
       
-      // Reabrir o stream para nova tentativa se houver mais tentativas
-      if (attempt < maxRetries && typeof fileStream.path === 'string') {
+      return new Promise((resolve, reject) => {
+        client.putObject(bucketName, objectName, fileStream, metaData, (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    },
+    
+    // Estratégia 4: Upload com cliente básico e configurações mínimas
+    async () => {
+      console.log('Tentando estratégia 4: Upload com configuração mínima');
+      const client = new Minio.Client({
+        endPoint: process.env.MINIO_ENDPOINT,
+        port: parseInt(process.env.MINIO_PORT) || 443,
+        useSSL: process.env.MINIO_USE_SSL === 'true',
+        accessKey: process.env.MINIO_ACCESS_KEY,
+        secretKey: process.env.MINIO_SECRET_KEY,
+        region: process.env.MINIO_REGION || 'us-east-1'
+      });
+      
+      return new Promise((resolve, reject) => {
+        client.putObject(bucketName, objectName, fileStream, metaData, (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    },
+    
+    // Estratégia 5: Último recurso - tentar usar o cliente padrão diretamente
+    async () => {
+      console.log('Tentando estratégia 5: Upload com cliente padrão');
+      return new Promise((resolve, reject) => {
+        minioClient.putObject(bucketName, objectName, fileStream, metaData, (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    }
+  ];
+  
+  // Tentar estratégias em sequência
+  for (let attempt = 0; attempt < Math.min(strategies.length, maxRetries); attempt++) {
+    try {
+      // Reabrir o stream se necessário
+      if (attempt > 0 && typeof fileStream.path === 'string') {
         fileStream = fs.createReadStream(fileStream.path);
       }
+      
+      // Executar a estratégia atual
+      await strategies[attempt]();
+      console.log(`Upload bem-sucedido com estratégia ${attempt + 1}`);
+      return true;
+    } catch (error) {
+      lastError = error;
+      console.log(`Falha na estratégia ${attempt + 1}: ${error.code || error.message}`);
     }
   }
   
-  // Todas as tentativas falharam
+  // Todas as estratégias falharam
+  console.error('Todas as estratégias de upload falharam');
   throw lastError;
 };
 

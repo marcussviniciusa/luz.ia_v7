@@ -8,7 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 const { minioClient, retryUpload } = require('../config/minio');
 
 /**
- * Faz upload de um arquivo para o MinIO usando diferentes estratégias
+ * Faz upload de um arquivo para o MinIO usando abordagem simples e confiável
  * @param {Object} fileData - Dados do arquivo (express-fileupload)
  * @param {string} destPath - Caminho de destino no bucket (sem o nome do arquivo)
  * @param {string} userId - ID do usuário para incluir no caminho
@@ -34,131 +34,120 @@ async function uploadFileToMinio(fileData, destPath, userId) {
     // Determinar a extensão do arquivo
     const fileExt = path.extname(fileData.name) || '.bin';
     
-    // Gerar um nome único para o arquivo
-    const objectName = `${destPath}/${userId}/${Date.now()}-${uuidv4()}${fileExt}`;
+    // Gerar um nome único para o arquivo (sem caracteres especiais para evitar problemas de URL)
+    const timestamp = Date.now();
+    const uuid = uuidv4().replace(/-/g, ''); // Remover hífens do UUID
+    const objectName = `${destPath}/${userId}/${timestamp}-${uuid}${fileExt}`;
     
-    // Definir metadados para o arquivo
+    // Definir metadados mínimos para o arquivo - simplificar para evitar problemas
     const metaData = {
-      'Content-Type': fileData.mimetype,
-      'X-Amz-Meta-Original-Filename': fileData.name
+      'Content-Type': fileData.mimetype || 'application/octet-stream'
     };
     
-    console.log(`Iniciando upload para MinIO: bucket=${bucketName}, objeto=${objectName}`);
+    console.log(`Iniciando upload simplificado para MinIO: bucket=${bucketName}, objeto=${objectName}`);
     
-    // Tentar diferentes estratégias de upload, começando pela mais robusta para grandes arquivos
+    // Determinar qual abordagem usar baseado no tipo de dados disponível
+    let result;
     
-    // Estratégia 1: Usar o caminho do arquivo temporário (express-fileupload) - mais eficiente para arquivos grandes
+    // Abordagem 1: Dados em arquivo temporário
     if (fileData.tempFilePath && fs.existsSync(fileData.tempFilePath)) {
-      console.log('Usando arquivo temporário para upload em streaming:', fileData.tempFilePath);
+      console.log('Usando arquivo temporário para upload: ', fileData.tempFilePath);
       
-      try {
-        // Usar abordagem de multiple retry para arquivos de qualquer tamanho
-        const stats = fs.statSync(fileData.tempFilePath);
-        console.log(`Arquivo de ${stats.size} bytes, usando mecanismo de retry adaptativo`);
-        
-        // Criar um stream de leitura do arquivo
-        const fileStream = fs.createReadStream(fileData.tempFilePath);
-        
-        // Usar nosso mecanismo de retry com diferentes configurações
-        await retryUpload(bucketName, objectName, fileStream, stats.size, metaData);
-        console.log('Upload bem-sucedido usando mecanismo de retry');
-      } catch (uploadError) {
-        console.error('Erro em todas as tentativas de upload:', uploadError);
-        
-        // Última tentativa: usar abordagem mais simples sem especificar tamanho
-        console.log('Tentando abordagem simplificada como último recurso');
-        const fileStream = fs.createReadStream(fileData.tempFilePath);
-        await minioClient.putObject(bucketName, objectName, fileStream, metaData);
-        console.log('Upload realizado com sucesso usando abordagem simplificada');
-      }
-    } 
-    // Estratégia 2: Usar os dados em memória para arquivos menores
+      // Abordagem mais simples e direta - sem retry complexo
+      // Usar Promise diretamente com o método callback do MinIO
+      result = await new Promise((resolve, reject) => {
+        minioClient.fPutObject(
+          bucketName,
+          objectName,
+          fileData.tempFilePath,
+          metaData,
+          (err, etag) => {
+            if (err) {
+              console.error('Erro no upload via fPutObject:', err);
+              return reject(err);
+            }
+            console.log('Upload com fPutObject bem-sucedido, etag:', etag);
+            resolve(etag);
+          }
+        );
+      });
+    }
+    // Abordagem 2: Dados em memória (buffer)
     else if (fileData.data) {
-      console.log('Usando dados em memória, tamanho:', fileData.data.length);
+      console.log('Usando dados em memória para upload, tamanho:', fileData.data.length);
       
-      // Criar um buffer a partir dos dados
+      // Usar abordagem mais simples, sem especificar tamanho
       const buffer = Buffer.from(fileData.data);
       
-      try {
-        // Tentativas com diferentes configurações
-        const bufferSize = buffer.length;
-        console.log(`Buffer em memória de ${bufferSize} bytes`);
-        
-        // Para dados em memória, usar abordagem de tentativas sequenciais
-        let success = false;
-        
-        // Tentativa 1: método mais simples
-        try {
-          await minioClient.putObject(bucketName, objectName, buffer, metaData);
-          success = true;
-          console.log('Upload bem-sucedido com método simples');
-        } catch (err1) {
-          console.log('Primeira tentativa falhou:', err1.code || err1.message);
-          
-          // Tentativa 2: especificar tamanho
-          try {
-            await minioClient.putObject(bucketName, objectName, buffer, bufferSize, metaData);
-            success = true;
-            console.log('Upload bem-sucedido especificando tamanho');
-          } catch (err2) {
-            console.log('Segunda tentativa falhou:', err2.code || err2.message);
+      // Usar Promise diretamente com método callback
+      result = await new Promise((resolve, reject) => {
+        minioClient.putObject(
+          bucketName,
+          objectName,
+          buffer,
+          metaData,
+          (err, etag) => {
+            if (err) {
+              console.error('Erro no upload via putObject (buffer):', err);
+              return reject(err);
+            }
+            console.log('Upload com putObject (buffer) bem-sucedido, etag:', etag);
+            resolve(etag);
           }
-        }
-        
-        if (!success) {
-          // Tentativa 3: Salvar em arquivo temporário e usar retryUpload
-          const tempPath = `/tmp/minio-buffer-${Date.now()}.tmp`;
-          fs.writeFileSync(tempPath, buffer);
-          
-          try {
-            const fileStream = fs.createReadStream(tempPath);
-            const stats = fs.statSync(tempPath);
-            await retryUpload(bucketName, objectName, fileStream, stats.size, metaData);
-            console.log('Upload bem-sucedido através de arquivo temporário');
-          } finally {
-            try { fs.unlinkSync(tempPath); } catch (e) {}
+        );
+      });
+    }
+    // Abordagem 3: Arquivo do Multer
+    else if (fileData.path && fs.existsSync(fileData.path)) {
+      console.log('Usando arquivo do Multer para upload: ', fileData.path);
+      
+      result = await new Promise((resolve, reject) => {
+        minioClient.fPutObject(
+          bucketName,
+          objectName,
+          fileData.path,
+          metaData,
+          (err, etag) => {
+            if (err) {
+              console.error('Erro no upload via fPutObject (Multer):', err);
+              return reject(err);
+            }
+            console.log('Upload com fPutObject (Multer) bem-sucedido, etag:', etag);
+            resolve(etag);
           }
-        }
-      } catch (uploadError) {
-        console.error('Erro em todas as tentativas de upload em memória:', uploadError);
-        throw uploadError;
-      }
-    } 
-    // Estratégia 3: Último recurso - Usar abordagem de arquivo temporário manual
+        );
+      });
+    }
     else {
-      console.log('Criando arquivo temporário próprio');
-      const tempPath = `/tmp/minio-upload-${Date.now()}.tmp`;
-      
-      // Se temos a propriedade 'path', é um arquivo do Multer
-      if (fileData.path && fs.existsSync(fileData.path)) {
-        // Copiar o arquivo do Multer para nosso arquivo temporário
-        fs.copyFileSync(fileData.path, tempPath);
-      } else {
-        throw new Error('Não foi possível obter dados do arquivo para upload');
-      }
-      
-      try {
-        // Usar o mecanismo de retry para maior chance de sucesso
-        const fileStream = fs.createReadStream(tempPath);
-        const stats = fs.statSync(tempPath);
-        await retryUpload(bucketName, objectName, fileStream, stats.size, metaData);
-        console.log('Upload bem-sucedido com mecanismo de retry');
-      } finally {
-        // Limpar o arquivo temporário
-        try {
-          fs.unlinkSync(tempPath);
-        } catch (err) {
-          console.error('Erro ao remover arquivo temporário:', err);
-        }
-      }
+      throw new Error('Formato de arquivo não suportado: não foram encontrados dados válidos');
     }
     
-    console.log('Upload concluído com sucesso');
+    console.log('Upload concluído com sucesso, resultado:', result);
+    
+    // Gerar URL para acessar o arquivo
+    // Usar URL absoluta para todos os ambientes para garantir compatibilidade
+    let fileUrl;
+    
+    // Preferir URLs absolutas geradas de forma segura
+    // Isso é crucial para garantir que as imagens sejam exibidas corretamente
+    const useSSL = process.env.MINIO_USE_SSL === 'true';
+    const protocol = useSSL ? 'https' : 'http';
+    const endpoint = process.env.MINIO_ENDPOINT;
+    const port = parseInt(process.env.MINIO_PORT) || (useSSL ? 443 : 80);
+    
+    // Para S3 padrão, não expor a porta no URL se for porta padrão (80 ou 443)
+    const portStr = (port === 80 || port === 443) ? '' : `:${port}`;
+    
+    // URL direta baseada em path-style
+    fileUrl = `${protocol}://${endpoint}${portStr}/${bucketName}/${objectName}`;
+    
+    // Log da URL gerada
+    console.log(`URL para o arquivo: ${fileUrl}`);
     
     // Retornar informações sobre o arquivo
     return {
       objectName: objectName,
-      url: `/api/proxy/minio/${objectName}`
+      url: fileUrl
     };
   } catch (error) {
     console.error('Erro ao fazer upload para MinIO:', error);
