@@ -259,7 +259,7 @@ function Analytics() {
             Sem dados suficientes
           </Typography>
           <Typography variant="body1" color="text.secondary" paragraph>
-            Continue usando o portal para gerar dados de análise e acompanhar seu progresso.
+            Continue usando o ecossistema para gerar dados de análise e acompanhar seu progresso.
           </Typography>
         </Paper>
       );
@@ -390,7 +390,7 @@ function Analytics() {
                   Atividade Diária
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Seu nível de engajamento com o portal ao longo do tempo
+                  Seu nível de engajamento com o ecossistema ao longo do tempo
                 </Typography>
                 
                 <Box sx={{ height: 300, mt: 1 }}>

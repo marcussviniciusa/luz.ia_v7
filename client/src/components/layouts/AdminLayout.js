@@ -159,7 +159,7 @@ function AdminLayout() {
               textAlign: 'center'
             }}
           >
-            Portal Mente Merecedora
+            Ecossistema Mente Merecedora
           </Typography>
         </Box>
         

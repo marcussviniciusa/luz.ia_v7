@@ -2,3 +2,5 @@
 server/.env
 server/node_modules
 client/node_modules
+docker-compose-of.yml
+node_modules

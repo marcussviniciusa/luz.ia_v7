@@ -69,7 +69,7 @@ function AuthLayout() {
               mb: 1
             }}
           >
-            Portal Mente Merecedora
+            Ecossistema Mente Merecedora
           </Typography>
           <Typography
             variant="h6"
@@ -115,7 +115,7 @@ function AuthLayout() {
               }
             }}
           >
-            &copy; {new Date().getFullYear()} Portal Mente Merecedora. Todos os direitos reservados.
+            &copy; {new Date().getFullYear()} Ecossistema Mente Merecedora. Todos os direitos reservados.
           </Typography>
           <Box sx={{ mt: 1, display: 'flex', justifyContent: 'center', gap: 2 }}>
             <Link component={RouterLink} to="/login" color="inherit" sx={{ color: 'rgba(255,255,255,0.9)' }}>

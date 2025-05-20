@@ -15,10 +15,10 @@ const theme = createTheme({
       contrastText: '#FFFFFF',
     },
     secondary: {
-      main: '#FFD700', // Dourado
-      light: '#FFDF4F',
-      dark: '#D6B800',
-      contrastText: '#212121',
+      main: '#b08945', // Dourado escuro
+      light: '#c69c5b',
+      dark: '#8e6d36',
+      contrastText: '#FFFFFF',
     },
     background: {
       default: '#F8F8F8',

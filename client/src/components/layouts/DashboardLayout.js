@@ -131,7 +131,7 @@ function DashboardLayout() {
               mb: 1
             }}
           >
-            Portal Mente Merecedora
+            Ecossistema Mente Merecedora
           </Typography>
           <Typography 
             variant="body2" 
@@ -230,7 +230,7 @@ function DashboardLayout() {
           </IconButton>
           
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {menuItems.find(item => item.path === location.pathname)?.text || 'Portal Mente Merecedora'}
+            {menuItems.find(item => item.path === location.pathname)?.text || 'Ecossistema Mente Merecedora'}
           </Typography>
           
           <Box sx={{ display: 'flex', alignItems: 'center' }}>

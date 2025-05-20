@@ -182,7 +182,7 @@ function Dashboard() {
           Bem-vinda, <GoldGradient>{user?.name?.split(' ')[0] || 'Jornada'}</GoldGradient>!
         </Typography>
         <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-          Que ótimo ter você no Portal Mente Merecedora. O que gostaria de explorar hoje?
+          Que ótimo ter você no Ecossistema Mente Merecedora. O que gostaria de explorar hoje?
         </Typography>
       </Box>
 

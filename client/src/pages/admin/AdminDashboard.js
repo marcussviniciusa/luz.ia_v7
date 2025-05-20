@@ -211,7 +211,7 @@ const AdminDashboard = () => {
                 <Divider />
                 <CardContent>
                   <Typography variant="body1" paragraph>
-                    O Portal Mente Merecedora está funcionando normalmente.
+                    O Ecossistema Mente Merecedora está funcionando normalmente.
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
                     Última atualização: 15 maio, 2025, 14:23

@@ -1,7 +1,7 @@
 {
-  "name": "portal-mente-merecedora-server",
+  "name": "ecossistema-mente-merecedora-server",
   "version": "1.0.0",
-  "description": "Backend para o Portal Mente Merecedora",
+  "description": "Backend para o Ecossistema Mente Merecedora",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

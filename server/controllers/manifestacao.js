@@ -60,15 +60,25 @@ exports.createManifestacao = asyncHandler(async (req, res, next) => {
         // Se for uma string JSON, mantenha-a como está
         if (typeof req.body.palavrasChave === 'string') {
           // Verificar se é um JSON válido
-          JSON.parse(req.body.palavrasChave);
+          const palavrasChaveObj = JSON.parse(req.body.palavrasChave);
           // Se não lançou erro, está ok
-          console.log('PalavrasChave processadas com sucesso:', req.body.palavrasChave);
+          console.log('PalavrasChave processadas com sucesso:', palavrasChaveObj);
+          
+          // Garantir que seja armazenado como string JSON no banco de dados
+          manifestacaoData.palavrasChave = req.body.palavrasChave;
+        } else if (Array.isArray(req.body.palavrasChave)) {
+          // Se já for um array, converter para string JSON
+          manifestacaoData.palavrasChave = JSON.stringify(req.body.palavrasChave);
+          console.log('PalavrasChave convertidas de array para JSON:', manifestacaoData.palavrasChave);
         }
       } catch (error) {
         // Se não for um JSON válido, converter para array e depois para JSON
         console.log('Erro ao processar palavrasChave, convertendo para array:', error);
         manifestacaoData.palavrasChave = JSON.stringify([req.body.palavrasChave]);
       }
+    } else {
+      // Valor padrão se não for fornecido
+      manifestacaoData.palavrasChave = JSON.stringify(["prosperidade", "dinheiro"]);
     }
     
     // Log para debug
@@ -90,72 +100,32 @@ exports.createManifestacao = asyncHandler(async (req, res, next) => {
   // Adicionar imagem se enviada
   if (req.files && req.files.imagem) {
     try {
-      const imagemFile = req.files.imagem;
-      const bucketName = process.env.MINIO_BUCKET_NAME;
+      // Importar o utilitário de upload
+      const { uploadFileToMinio } = require('../utils/minioUpload');
       
-      // Verificar se o bucket existe
-      const bucketExists = await minioClient.bucketExists(bucketName);
-      console.log(`Bucket ${bucketName} existe? ${bucketExists}`);
+      console.log('Processando upload de imagem para manifestação...');
       
-      if (!bucketExists) {
-        console.log(`Criando bucket ${bucketName}...`);
-        await minioClient.makeBucket(bucketName);
-      }
+      // Upload da imagem usando o utilitário
+      const uploadResult = await uploadFileToMinio(
+        req.files.imagem, 
+        'manifestacoes',
+        req.user.id
+      );
       
-      // Obter a extensão do arquivo original
-      const fileExt = path.extname(imagemFile.name) || '.jpg';
-      const objectName = `manifestacoes/${req.user.id}/${Date.now()}-${uuidv4()}${fileExt}`;
-      
-      // Definir metadados para o arquivo
-      const metaData = {
-        'Content-Type': imagemFile.mimetype,
-        'X-Amz-Meta-Original-Filename': imagemFile.name
-      };
-      
-      console.log(`Iniciando upload de imagem para MinIO bucket=${bucketName}, file=${objectName}`);
-      
-      if (imagemFile.tempFilePath) {
-        console.log('Usando arquivo temporário para upload de imagem:', imagemFile.tempFilePath);
-        
-        // Upload do arquivo para o MinIO usando o arquivo temporário
-        await minioClient.fPutObject(
-          bucketName, 
-          objectName, 
-          imagemFile.tempFilePath,
-          metaData
-        );
-      } else if (imagemFile.data) {
-        console.log('Usando dados em memória para upload de imagem');
-        
-        // Salvar temporariamente os dados em um arquivo
-        const tempPath = `/tmp/upload-manifestacao-${Date.now()}.tmp`;
-        fs.writeFileSync(tempPath, imagemFile.data);
-        
-        // Upload do arquivo temporário
-        await minioClient.fPutObject(
-          bucketName, 
-          objectName, 
-          tempPath,
-          metaData
-        );
-        
-        // Remover o arquivo temporário
-        fs.unlinkSync(tempPath);
-      }
-      
-      console.log('Arquivo de imagem salvo com sucesso');
-
-      // Gerar URL via proxy interno para a imagem
-      const imageUrl = `/api/proxy/minio/${objectName}`;
+      console.log('Upload concluído com sucesso:', uploadResult);
       
       // Adicionar informações da imagem ao documento
       manifestacaoData.imagens = [{
-        path: imageUrl,
-        objectName: objectName,
+        path: uploadResult.url,
+        objectName: uploadResult.objectName,
         descricao: req.body.descricao || ''
       }];
-      
-      console.log(`Imagem enviada com sucesso para ${imageUrl}`);
+
+      // Se for um símbolo, também usar a imagem como o símbolo
+      if (req.body.tipo === 'simbolo') {
+        manifestacaoData.simboloPath = uploadResult.url;
+        manifestacaoData.symbolObjectName = uploadResult.objectName;
+      }
     } catch (error) {
       console.error('Erro ao fazer upload da imagem:', error);
       // Não interromper a criação da manifestação se o upload falhar
@@ -265,6 +235,58 @@ exports.updateManifestacao = asyncHandler(async (req, res, next) => {
     
     // Remover o campo singular para evitar duplicidade
     delete req.body.afirmacao;
+  }
+  
+  // Processamento especial para símbolos
+  if (req.body.tipo === 'simbolo') {
+    console.log('Atualizando símbolo, valores originais:', {
+      palavrasChaveOriginal: manifestacao.palavrasChave,
+      significadoOriginal: manifestacao.significado || manifestacao.descricao
+    });
+    
+    // Garantir compatibilidade entre nome e título
+    if (req.body.nome && !req.body.titulo) {
+      req.body.titulo = req.body.nome;
+    }
+    else if (req.body.titulo && !req.body.nome) {
+      req.body.nome = req.body.titulo;
+    }
+    
+    // Garantir que o significado seja armazenado no campo descricao para compatibilidade
+    if (req.body.significado) {
+      req.body.descricao = req.body.significado;
+    }
+    else if (req.body.descricao && !req.body.significado) {
+      req.body.significado = req.body.descricao;
+    }
+    
+    // Certificar-se de que as palavras-chave sejam armazenadas corretamente
+    if (req.body.palavrasChave) {
+      try {
+        // Se for uma string JSON, mantenha-a como está
+        if (typeof req.body.palavrasChave === 'string') {
+          // Verificar se é um JSON válido
+          const palavrasChaveObj = JSON.parse(req.body.palavrasChave);
+          // Se não lançou erro, está ok
+          console.log('Update - PalavrasChave processadas com sucesso:', palavrasChaveObj);
+          
+          // Garantir que seja armazenado como string JSON no banco de dados
+          req.body.palavrasChave = JSON.stringify(palavrasChaveObj);
+        } else if (Array.isArray(req.body.palavrasChave)) {
+          // Se já for um array, converter para string JSON
+          req.body.palavrasChave = JSON.stringify(req.body.palavrasChave);
+          console.log('Update - PalavrasChave convertidas de array para JSON:', req.body.palavrasChave);
+        }
+      } catch (error) {
+        // Se não for um JSON válido, converter para array e depois para JSON
+        console.log('Update - Erro ao processar palavrasChave, convertendo para array:', error);
+        req.body.palavrasChave = JSON.stringify([req.body.palavrasChave]);
+      }
+    } else {
+      // Preservar as palavras-chave existentes
+      console.log('Update - Preservando palavras-chave existentes:', manifestacao.palavrasChave);
+      req.body.palavrasChave = manifestacao.palavrasChave;
+    }
   }
   
   // Atualizar item

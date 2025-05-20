@@ -246,7 +246,7 @@ function SimbolosManifestacao({ simbolos = [] }) {
     '#9C27B0', // Roxo
     '#F44336', // Vermelho
     '#FF9800', // Laranja
-    '#FFEB3B', // Amarelo
+    '#b08945', // Dourado escuro
     '#795548', // Marrom
     '#607D8B'  // Azul acinzentado
   ];

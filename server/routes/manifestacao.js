@@ -64,68 +64,25 @@ router.post('/:id/imagem', asyncHandler(async (req, res, next) => {
   }
   
   try {
-    const imagemFile = req.files.imagem;
-    const bucketName = process.env.MINIO_BUCKET_NAME;
+    // Importar o utilitário de upload
+    const { uploadFileToMinio } = require('../utils/minioUpload');
     
-    // Verificar se o bucket existe
-    const bucketExists = await minioClient.bucketExists(bucketName);
-    console.log(`Bucket ${bucketName} existe? ${bucketExists}`);
+    console.log('Corpo da requisição recebida:', req.body);
+    console.log('Arquivos recebidos:', req.files ? Object.keys(req.files) : 'Nenhum');
     
-    if (!bucketExists) {
-      console.log(`Criando bucket ${bucketName}...`);
-      await minioClient.makeBucket(bucketName);
-    }
+    // Upload da imagem usando o utilitário
+    const uploadResult = await uploadFileToMinio(
+      req.files.imagem, 
+      'manifestacoes',
+      req.user.id
+    );
     
-    // Obter a extensão do arquivo original
-    const fileExt = path.extname(imagemFile.name) || '.jpg';
-    const objectName = `manifestacoes/${req.user.id}/${Date.now()}-${uuidv4()}${fileExt}`;
-    
-    // Definir metadados para o arquivo
-    const metaData = {
-      'Content-Type': imagemFile.mimetype,
-      'X-Amz-Meta-Original-Filename': imagemFile.name
-    };
-    
-    console.log(`Iniciando upload de imagem para MinIO bucket=${bucketName}, file=${objectName}`);
-    
-    if (imagemFile.tempFilePath) {
-      console.log('Usando arquivo temporário para upload de imagem:', imagemFile.tempFilePath);
-      
-      // Upload do arquivo para o MinIO usando o arquivo temporário
-      await minioClient.fPutObject(
-        bucketName, 
-        objectName, 
-        imagemFile.tempFilePath,
-        metaData
-      );
-    } else if (imagemFile.data) {
-      console.log('Usando dados em memória para upload de imagem');
-      
-      // Salvar temporariamente os dados em um arquivo
-      const tempPath = `/tmp/upload-manifestacao-${Date.now()}.tmp`;
-      fs.writeFileSync(tempPath, imagemFile.data);
-      
-      // Upload do arquivo temporário
-      await minioClient.fPutObject(
-        bucketName, 
-        objectName, 
-        tempPath,
-        metaData
-      );
-      
-      // Remover o arquivo temporário
-      fs.unlinkSync(tempPath);
-    }
-    
-    console.log('Arquivo de imagem salvo com sucesso');
-    
-    // Gerar URL via proxy interno para a imagem
-    const imageUrl = `/api/proxy/minio/${objectName}`;
+    console.log('Upload concluído com sucesso:', uploadResult);
     
     // Adicionar informações da imagem ao documento
     const novaImagem = {
-      path: imageUrl,
-      objectName: objectName,
+      path: uploadResult.url,
+      objectName: uploadResult.objectName,
       descricao: req.body.descricao || ''
     };
     
@@ -176,79 +133,39 @@ router.post('/:id/simbolo', asyncHandler(async (req, res, next) => {
   }
   
   try {
-    const simboloFile = req.files.simbolo;
-    const bucketName = process.env.MINIO_BUCKET_NAME;
+    // Importar os utilitários de upload e remoção
+    const { uploadFileToMinio, removeFileFromMinio } = require('../utils/minioUpload');
     
-    // Obter a extensão do arquivo original
-    const fileExt = path.extname(simboloFile.name) || '.jpg';
-    const fileName = `manifestacao/simbolo/${req.user.id}/${Date.now()}-${uuidv4()}${fileExt}`;
-    
-    // Verificar se o bucket existe
-    const bucketExists = await minioClient.bucketExists(bucketName);
-    if (!bucketExists) {
-      console.log(`Criando bucket ${bucketName}...`);
-      await minioClient.makeBucket(bucketName);
-    }
+    console.log('Corpo da requisição recebida para símbolo:', req.body);
+    console.log('Arquivos recebidos para símbolo:', req.files ? Object.keys(req.files) : 'Nenhum');
     
     // Se já existe um símbolo, remover do MinIO
     if (manifestacao.symbolObjectName) {
       try {
-        await minioClient.removeObject(bucketName, manifestacao.symbolObjectName);
-        console.log('Símbolo antigo removido com sucesso');
+        await removeFileFromMinio(manifestacao.symbolObjectName);
+        console.log(`Símbolo antigo ${manifestacao.symbolObjectName} removido com sucesso`);
       } catch (error) {
         console.error('Erro ao remover símbolo antigo:', error);
         // Continuar mesmo com erro
       }
     }
     
-    // Definir metadados para o arquivo
-    const metaData = {
-      'Content-Type': simboloFile.mimetype,
-      'X-Amz-Meta-Original-Filename': simboloFile.name
-    };
+    // Upload do símbolo usando o utilitário
+    const uploadResult = await uploadFileToMinio(
+      req.files.simbolo, 
+      'manifestacao/simbolo',
+      req.user.id
+    );
     
-    console.log(`Iniciando upload de símbolo para MinIO bucket=${bucketName}, file=${fileName}`);
-    
-    if (simboloFile.tempFilePath) {
-      console.log('Usando arquivo temporário para upload de símbolo:', simboloFile.tempFilePath);
-      
-      // Upload do arquivo para o MinIO usando o arquivo temporário
-      await minioClient.fPutObject(
-        bucketName, 
-        fileName, 
-        simboloFile.tempFilePath,
-        metaData
-      );
-    } else if (simboloFile.data) {
-      console.log('Usando dados em memória para upload de símbolo');
-      
-      // Salvar temporariamente os dados em um arquivo
-      const tempPath = `/tmp/upload-simbolo-${Date.now()}.tmp`;
-      fs.writeFileSync(tempPath, simboloFile.data);
-      
-      // Upload do arquivo temporário
-      await minioClient.fPutObject(
-        bucketName, 
-        fileName, 
-        tempPath,
-        metaData
-      );
-      
-      // Remover o arquivo temporário
-      fs.unlinkSync(tempPath);
-    }
-    
-    // Gerar URL via proxy interno para a imagem
-    // Isso evita problemas de CORS e de resolução de DNS
-    const symbolUrl = `/api/proxy/minio/${fileName}`;
+    console.log('Upload de símbolo concluído com sucesso:', uploadResult);
     
     // Log para debug
-    console.log(`URL do símbolo gerada via proxy: ${symbolUrl}`);
-    console.log(`Nome do objeto no MinIO: ${fileName}`);
+    console.log(`URL do símbolo gerada via proxy: ${uploadResult.url}`);
+    console.log(`Nome do objeto no MinIO: ${uploadResult.objectName}`);
     
     // Atualizar caminho do símbolo (armazenar a URL completa)
-    manifestacao.simboloPath = symbolUrl;
-    manifestacao.symbolObjectName = fileName; // Guardar o nome do objeto para remoção futura
+    manifestacao.simboloPath = uploadResult.url;
+    manifestacao.symbolObjectName = uploadResult.objectName; // Guardar o nome do objeto para remoção futura
     manifestacao.updatedAt = Date.now();
     
     await manifestacao.save();
