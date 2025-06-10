@@ -7,6 +7,25 @@ const path = require('path');
 const errorHandler = require('./middleware/error');
 const { minioClient, initializeBucket } = require('./config/minio');
 
+// Função para garantir que a imagem padrão existe
+const ensureDefaultImage = () => {
+  const fs = require('fs');
+  const imagePath = path.join(__dirname, 'public/images/pratica-default.jpg');
+  const clientImagePath = path.join(__dirname, '../client/public/static/images/pratica-default.jpg');
+  
+  if (!fs.existsSync(imagePath) || !fs.existsSync(clientImagePath)) {
+    console.log('⚠️ Imagem padrão não encontrada, criando...');
+    try {
+      require('./scripts/create-default-image');
+    } catch (error) {
+      console.warn('⚠️ Não foi possível criar imagem padrão automaticamente:', error.message);
+    }
+  }
+};
+
+// Garantir que a imagem padrão existe
+ensureDefaultImage();
+
 // Inicializar cliente MinIO e bucket
 initializeBucket().catch(err => {
   console.error('Erro ao inicializar o bucket MinIO:', err);
@@ -26,7 +45,7 @@ app.use(cors());
 app.use(fileUpload({
   createParentPath: true,
   limits: { fileSize: 50 * 1024 * 1024 }, // limite de 50MB
-  debug: true, // habilitar logs de debug
+  debug: false, // desabilitar logs de debug para reduzir spam
   useTempFiles: true,
   tempFileDir: '/tmp/'
 }));

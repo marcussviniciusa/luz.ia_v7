@@ -34,6 +34,14 @@ COPY --from=client-build /app/client/build ./client/build
 # Caminho 2: /app/server/public (para servir arquivos estáticos via express.static)
 COPY --from=client-build /app/client/build ./server/public
 
+# Criar diretórios para imagens padrão
+RUN mkdir -p /app/client/build/static/images
+RUN mkdir -p /app/server/public/images
+
+# Executar script para criar imagens padrão
+WORKDIR /app/server
+RUN node scripts/create-default-image.js || echo "Aviso: Não foi possível criar imagens padrão"
+
 # Expor a porta do servidor
 EXPOSE 5000
 

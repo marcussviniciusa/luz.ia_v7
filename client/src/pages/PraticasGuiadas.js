@@ -518,7 +518,12 @@ function PraticasGuiadas() {
                       onError={(e) => {
                         // Se a imagem não carregar, usar imagem de fallback
                         console.log('Erro ao carregar imagem:', e.target.src);
-                        e.target.src = '/static/images/pratica-default.jpg';
+                        if (!e.target.src.includes('pratica-default.jpg')) {
+                          e.target.src = '/static/images/pratica-default.jpg';
+                        } else {
+                          // Se até a imagem padrão falhar, ocultar
+                          e.target.style.display = 'none';
+                        }
                       }}
                     />
                     
@@ -638,9 +643,18 @@ function PraticasGuiadas() {
             <Grid item xs={12} sm={3} md={3}>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Avatar
-                  src={selectedPratica.imagemUrl || '/static/images/pratica-default.jpg'}
+                  src={
+                    selectedPratica.imagemCapa 
+                      ? `/api/proxy/minio/${selectedPratica.imagemCapa}` 
+                      : '/static/images/pratica-default.jpg'
+                  }
                   alt={selectedPratica.titulo}
                   sx={{ width: 50, height: 50, mr: 2 }}
+                  onError={(e) => {
+                    if (!e.target.src.includes('pratica-default.jpg')) {
+                      e.target.src = '/static/images/pratica-default.jpg';
+                    }
+                  }}
                 />
                 <Box>
                   <Typography variant="subtitle1" noWrap sx={{ maxWidth: 180 }}>

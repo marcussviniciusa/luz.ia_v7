@@ -1,5 +1,5 @@
 const { ChatOpenAI } = require('@langchain/openai');
-const { PromptTemplate } = require('langchain/prompts');
+const { PromptTemplate } = require('@langchain/core/prompts');
 const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { MemoryVectorStore } = require('langchain/vectorstores/memory');
 const { OpenAIEmbeddings } = require('@langchain/openai');
@@ -7,6 +7,7 @@ const { StringOutputParser } = require('@langchain/core/output_parsers');
 const { RunnableSequence } = require('@langchain/core/runnables');
 const fs = require('fs').promises;
 const path = require('path');
+const pdf = require('pdf-parse');
 
 // Classe principal que implementa a LUZ IA usando LangChain e RAG
 class LuzIA {
@@ -129,6 +130,16 @@ Contexto relevante do curso:
           const filePath = path.join(this.courseTranscriptPath, file);
           const content = await fs.readFile(filePath, 'utf-8');
           documents.push(content);
+        } else if (file.endsWith('.pdf')) {
+          try {
+            const filePath = path.join(this.courseTranscriptPath, file);
+            const buffer = await fs.readFile(filePath);
+            const data = await pdf(buffer);
+            documents.push(data.text);
+            console.log(`PDF ${file} processado com sucesso. Texto extraído: ${data.text.length} caracteres`);
+          } catch (error) {
+            console.error(`Erro ao processar PDF ${file}:`, error.message);
+          }
         }
       }
       

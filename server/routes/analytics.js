@@ -105,7 +105,12 @@ router.get('/me/recent-activity', asyncHandler(async (req, res, next) => {
   })
     .sort({ createdAt: -1 })
     .limit(limit)
-    .populate('pratica', 'titulo categoria')
+    .populate({
+      path: 'pratica',
+      select: 'titulo categoria',
+      // Incluir apenas registros onde a prática existe
+      match: { _id: { $exists: true } }
+    })
     .select('_id pratica createdAt duracao');
   
   // Combinar todos os tipos de atividade e ordenar por data
@@ -129,16 +134,18 @@ router.get('/me/recent-activity', asyncHandler(async (req, res, next) => {
         createdAt: conv.createdAt
       }
     })),
-    ...praticasRegistros.map(reg => ({
-      type: 'pratica',
-      id: reg._id,
-      title: `Prática: ${reg.pratica.titulo}`,
-      date: reg.createdAt,
-      data: {
-        categoria: reg.pratica.categoria,
-        duracao: reg.duracao
-      }
-    }))
+    ...praticasRegistros
+      .filter(reg => reg.pratica !== null)
+      .map(reg => ({
+        type: 'pratica',
+        id: reg._id,
+        title: `Prática: ${reg.pratica.titulo}`,
+        date: reg.createdAt,
+        data: {
+          categoria: reg.pratica.categoria,
+          duracao: reg.duracao
+        }
+      }))
   ];
   
   // Ordenar todas as atividades por data (mais recente primeiro)
